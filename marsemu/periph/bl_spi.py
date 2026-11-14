@@ -19,6 +19,7 @@ CT firmware is in :class:`BlMeter`'s docstring.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Callable, Dict, List, Optional
 
 log = logging.getLogger(__name__)
@@ -135,15 +136,17 @@ class BlMeter:
     meter's answers to a battery:
 
     * 0x22, 0x23, 0x24: active power of phases A, B and C, signed 24 bits,
-      about 134.17 counts per watt (the firmware's scale with the calibration
-      it writes at start-up), cut toward zero to whole watts.  A full-scale
-      reading (0x7FFFFF or 0x800000) comes out as 3025 W.
+      134.193 counts per watt (the firmware's scale with the calibration it
+      writes at start-up; 1000 W starts at 134193 counts, 2000 W at 268386).
+      The firmware cuts each phase toward zero to whole watts and adds the
+      unrounded phases for the total.  Linear to at least +-29800 W; the
+      full-scale codes 0x7FFFFF and 0x800000 come out as 3025 W.
     * Every other register the firmware reads (RMS currents and voltages,
       energy counters, frequency) feeds only its cloud report.
     """
 
     POWER_REGS = {"A": 0x22, "B": 0x23, "C": 0x24}
-    COUNTS_PER_W = 134.17
+    COUNTS_PER_W = 134.193
 
     def __init__(self, chip: BlChip):
         self.chip = chip
@@ -151,14 +154,13 @@ class BlMeter:
         self.set_power(0.0, 0.0, 0.0)
 
     def set_power(self, a: float, b: float, c: float) -> None:
-        """Grid power per phase in watts, + import, - export.  The firmware
-        reports whole watts: the register is put in the middle of the step so
-        it reports ``round(w)``."""
+        """Grid power per phase in watts, + import, - export.  A whole number
+        of watts is reported as exactly that: the register gets the smallest
+        count the firmware reads as that many watts."""
         for ph, w in zip("ABC", (a, b, c)):
             self.power[ph] = float(w)
-            whole = round(w)
-            counts = round((whole + (0.5 if whole >= 0 else -0.5)) * self.COUNTS_PER_W)
-            counts = max(-0x7FFFFF, min(0x7FFFFE, counts))
+            counts = math.ceil(abs(w) * self.COUNTS_PER_W - 1e-6)
+            counts = min(counts, 0x7FFFFE) * (1 if w >= 0 else -1)
             self.chip.regs[self.POWER_REGS[ph]] = counts & 0xFFFFFF
 
 

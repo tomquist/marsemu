@@ -194,6 +194,7 @@ def main() -> int:
     agree = defaultdict(int)
     differ = defaultdict(int)
     transient = defaultdict(int)
+    rounding = defaultdict(int)
     shown = []
     missing = {"fw": 0, "astra": 0}
     for p in polls:
@@ -213,6 +214,10 @@ def main() -> int:
             b = aa[i] if i < len(aa) else ""
             if a == b:
                 agree[name] += 1
+            elif name == "total_power" and a.lstrip("-").isdigit() and b.lstrip("-").isdigit() \
+                    and abs(int(a) - int(b)) == 1:
+                # the firmware adds the unrounded phases, AstraMeter whole watts
+                rounding[name] += 1
             elif moving:
                 transient[name] += 1
             else:
@@ -227,13 +232,13 @@ def main() -> int:
     if delays:
         print(f"firmware reply delay: median {delays[len(delays) // 2] * 1000:.0f} ms,"
               f" max {delays[-1] * 1000:.0f} ms (AstraMeter answers at once)")
-    print(f"{'field':<14}{'agree':>7}{'differ':>8}{'in transition':>15}")
+    print(f"{'field':<14}{'agree':>7}{'differ':>8}{'in transition':>15}{'1 W rounding':>14}")
     for name in FIELDS:
         if name in IGNORED:
             continue
-        if differ[name] or transient[name] or agree[name]:
+        if differ[name] or transient[name] or agree[name] or rounding[name]:
             mark = "  <--" if differ[name] else ""
-            print(f"{name:<14}{agree[name]:>7}{differ[name]:>8}{transient[name]:>15}{mark}")
+            print(f"{name:<14}{agree[name]:>7}{differ[name]:>8}{transient[name]:>15}{rounding[name]:>14}{mark}")
     if shown:
         print("\nfirst disagreements (steady grid):")
         for p, name, a, b in shown:
