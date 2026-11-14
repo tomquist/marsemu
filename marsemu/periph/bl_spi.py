@@ -1,4 +1,4 @@
-"""Belling BL09xx energy-metering IC on bit-banged SPI (the CT002/CT003 meter).
+"""Belling BL09xx energy-metering IC on bit-banged SPI (the CT002 meter, HME-4).
 
 The CT00x firmware drives the chip in software on GPIOA: PA4 chip select,
 PA5 clock, PA7 data to the chip, PA6 data from it, most significant bit first.

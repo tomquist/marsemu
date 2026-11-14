@@ -941,9 +941,10 @@ class _MeterDevice:
 class CtSession(DeviceSession):
     """A CT002/CT003 meter: its firmware with the Wi‑Fi module model, polled by
     virtual batteries the way real ones poll it; its answers are the firmware's
-    own.  On a CT002 the clamps see the house (its load spread over the three
-    phases) minus what each battery delivers on its phase, through the modelled
-    metering chip; the CT003's measurement is not modelled (0 W)."""
+    own.  The grid it measures is the house (its load spread over the three
+    phases) minus what each battery delivers on its phase: on a CT002 through
+    its modelled metering chip, on a CT003 (a P1 reader) as the utility
+    meter's telegrams."""
 
     MODEL = "CT002 / CT003"
     HAS_PACK = False
@@ -966,6 +967,12 @@ class CtSession(DeviceSession):
 
     def _build(self, control_kwargs: dict, soc: float, **_):
         return _MeterDevice(self.firmware, control_kwargs)
+
+    @property
+    def ct_type(self) -> str:
+        """What the batteries call this meter: HME-3 for the CT003 (a P1 reader), HME-4 for the CT002."""
+        from ..periph.p1 import P1Meter
+        return "HME-3" if isinstance(getattr(self.emu, "ct_meter", None), P1Meter) else "HME-4"
 
     @property
     def ct_id(self) -> str:
@@ -1020,7 +1027,7 @@ class CtSession(DeviceSession):
             return
         mod = self.emu.fc41d
         for k, b in enumerate(self.batteries[:self.n_batteries]):
-            data = ct_payload([b["type"], b["mac"], "HME-4", self.ct_id, b["phase"], str(int(b["w"])), "1"])
+            data = ct_payload([b["type"], b["mac"], self.ct_type, self.ct_id, b["phase"], str(int(b["w"])), "1"])
             self._log("UDP", "battery→CT", f"{b['type']} {b['mac']} polls: phase {b['phase']}, delivering {b['w']:.0f} W")
             mod.post(lambda d=data, k=k: mod.socket_received(sid, d, (f"192.168.1.{60 + k}", 12345)))
 
@@ -1053,6 +1060,8 @@ class CtSession(DeviceSession):
                           "socket": self._service_socket() is not None,
                           "clamps": ({k: round(v, 1) for k, v in self.clamp_power().items()}
                                      if self.clamps is not None else None),
+                          "source": "p1" if self.ct_type == "HME-3" else "chip",
+                          "type": self.ct_type,
                           "house_load": self.house_load},
                 "load": self.house_load,
                 "batteries": [{k: v for k, v in b.items()} for b in self.batteries[:self.n_batteries]]}

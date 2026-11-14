@@ -711,7 +711,7 @@ function renderCt() {
   const cl = me.clamps;
   [["A", 4], ["B", 5], ["C", 6]].forEach(([k, i]) => {
     V["cl" + k].textContent = `${last[i] ?? 0} W`;
-    V["cl" + k + "2"].textContent = cl ? `clamp ${sgn(cl[k])} W` : "input not modelled";
+    V["cl" + k + "2"].textContent = cl ? `${me.source === "p1" ? "P1" : "clamp"} ${sgn(cl[k])} W` : "input not modelled";
   });
   for (let k = 1; k <= 3; k++) {
     const b = bats[k - 1], on = !!b;
@@ -1032,7 +1032,7 @@ function inspectCt() {
     const ph = sel.slice(-1), cl = SN.meter.clamps;
     return kv([["Measured", cl ? `${sgn(cl[ph])} W (house ${Math.round(SN.meter.house_load / 3)} W minus batteries on ${ph})` : "0 W (not modelled)"],
       ["In the answers", `${last[{ clampA: 4, clampB: 5, clampC: 6 }[sel]] ?? 0} W`],
-      ["Path", cl ? "metering chip (BL09xx, bit-banged SPI) → firmware" : "–"]]);
+      ["Path", !cl ? "–" : SN.meter.source === "p1" ? "utility meter → P1 telegram (DSMR, USART3) → firmware" : "metering chip (BL09xx, bit-banged SPI) → firmware"]]);
   }
   if (sel === "fc41d") return kv([["Module firmware", esc(SN.fc41d.version)], ["Wi‑Fi", SN.fc41d.wifi ? "connected" : "disconnected"], ["UDP service", me.socket ? "port 12345" : "not open yet"], ["BLE name", esc(SN.fc41d.ble || "–")], ["Command topic", esc(SN.sub_topic || "–")]]);
   if (sel === "broker") { const s0 = (SN.fc41d.mqtt || [])[0]; return kv([["Session", s0 ? `${s0.connected ? "connected" : "closed"} · ${esc(s0.host)}:${s0.port}` : "none"]]); }
@@ -1368,7 +1368,7 @@ const TRACE_CE = [
 const TRACE_CT = [
   { h: "A battery polls the meter", p: () => `Every 2.7 s each battery sends a UDP poll to port 12345 with its phase and the power it delivers. ${(SN.batteries || []).length} are polling.`, hl: ["m-bat1", "rfbat1", "ant", "m-fc41d"], sel: "bat1", go: () => capsule("rfbat1", -1, "poll") },
   { h: "The module hands it over", p: () => "The Wi‑Fi module passes the datagram to the meter's MCU on USART1 (+QIURC, then AT+QIRD).", hl: ["m-fc41d", "usart", "m-mcu"], sel: "fc41d", go: () => capsule("usart", -1, "+QIURC") },
-  { h: "The firmware answers", p: () => `Real firmware: grid per phase (${SN.meter.clamps ? "read from the metering chip" : "0 W, the clamps are not modelled"}), the total, how many batteries report on each phase (${((SN.meter.last || []).slice(8, 11).join("/")) || "–"}), its RSSI.`, hl: ["m-mcu", "m-clampA", "m-clampB", "m-clampC", "adcA", "adcB", "adcC"], sel: "mcu" },
+  { h: "The firmware answers", p: () => `Real firmware: grid per phase (${!SN.meter.clamps ? "0 W, the clamps are not modelled" : SN.meter.source === "p1" ? "parsed from the utility meter's P1 telegram" : "read from the metering chip"}), the total, how many batteries report on each phase (${((SN.meter.last || []).slice(8, 11).join("/")) || "–"}), its RSSI.`, hl: ["m-mcu", "m-clampA", "m-clampB", "m-clampC", "adcA", "adcB", "adcC"], sel: "mcu" },
   { h: "The answer goes back", p: () => `AT+QISEND, then UDP to the battery. ${SN.meter.replies} answers so far.`, hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfbat1", "m-bat1"], sel: "bat1", go: () => capsule("rfbat1", 1, "answer") },
   { h: "It reports to the cloud stand-in", p: () => "Over MQTT and HTTP the meter reports what it measures and how many batteries it serves; marsemu answers both locally.", hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfbroker", "m-broker"], sel: "broker" },
 ];
@@ -1419,7 +1419,7 @@ const LEGENDS = {
   "Venus D": [["solar", "PV"], ["charge", "into the pack"], ["discharge", "toward the house"], ["ext", "CAN"], ["uart", "UART6"], ["i2c", "I2C / SPI"], ["analog", "RS485"], ["rf", "Wi‑Fi / BLE"]],
   "Jupiter C/E": [["solar", "PV"], ["charge", "into the pack"], ["discharge", "toward the house"], ["ext", "CAN"], ["uart", "USART1"], ["i2c", "SPI"], ["rf", "Wi‑Fi / BLE"]],
   "Venus C/E": [["charge", "into the pack"], ["discharge", "toward the house"], ["ext", "FDCAN"], ["uart", "LPUART1"], ["analog", "HRTIM / ADC / GPIO"], ["i2c", "SPI"], ["rf", "Wi‑Fi / BLE"]],
-  "CT002 / CT003": [["uart", "USART1"], ["i2c", "SPI flash"], ["analog", "ADC (clamps)"], ["rf", "Wi‑Fi: UDP, MQTT, BLE"]],
+  "CT002 / CT003": [["uart", "USART1"], ["i2c", "SPI flash"], ["analog", "metering chip / P1 port"], ["rf", "Wi‑Fi: UDP, MQTT, BLE"]],
 };
 LEGENDS["Venus A"] = LEGENDS["Venus D"]; LEGENDS["Jupiter C Plus"] = LEGENDS["Jupiter C/E"];
 const SHELL = { "B2500": ["B2500", "2.24 kWh · 800 W"], "Venus E 3.0": ["VENUS E", "5.12 kWh · 2.5 kW"],

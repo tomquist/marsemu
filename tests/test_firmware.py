@@ -855,3 +855,27 @@ def test_ui_ct_session_answers_batteries():
     assert snap["meter"]["last"][8:10] == ["1", "1"]          # one battery on phase A, one on B
     assert snap["meter"]["clamps"] == {"A": -100.0, "B": -100.0, "C": 200.0}
     assert [int(v) for v in snap["meter"]["last"][4:8]] == [-100, -100, 200, 0]
+
+
+def test_ui_ct003_session_reads_the_p1_meter():
+    """The CT003 is a P1 reader: once its P1 line idles high it reads the
+    utility meter's telegrams on USART3 and answers the batteries with them."""
+    import time
+    from marsemu.ui.session import CtSession
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/HME-3/122/*.bin", recursive=True))
+    if not files:
+        pytest.skip("CT003 HME-3 V122 not in the archive")
+    s = CtSession(files[0], batteries=2, battery_w=300, load=600, speed=0)
+    s.start()
+    try:
+        deadline = time.time() + 300
+        while s.read()["snapshot"]["t"] < 30 and time.time() < deadline:
+            time.sleep(0.5)
+        snap = s.read()["snapshot"]
+    finally:
+        s.stop()
+    assert snap["meter"]["type"] == "HME-3" and snap["meter"]["source"] == "p1"
+    assert snap["meter"]["last"][0] == "HME-3" and len(snap["meter"]["last"]) == 28
+    assert [int(v) for v in snap["meter"]["last"][4:8]] == [-100, -100, 200, 0]

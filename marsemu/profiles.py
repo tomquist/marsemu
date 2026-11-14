@@ -302,10 +302,17 @@ def ct_spi_flash(emu) -> None:
 
 
 def ct_meter_chip(emu) -> None:
-    """CT002 (HME-4): the BL09xx metering chip on bit-banged SPI (GPIOA PA4-PA7).
-    Its registers start at 0, i.e. no load on any clamp."""
+    """What the meter measures, as ``emu.ct_meter`` (``set_power(a, b, c)``):
+
+    * CT003 (HME-3), a P1 reader: a utility meter on its P1 port (USART3),
+      a DSMR 5 telegram a second;
+    * CT002 (HME-4): the BL09xx metering chip on bit-banged SPI (GPIOA PA4-PA7).
+
+    Both start at 0 W on every phase."""
     from .periph.bl_spi import attach_ct_meter
-    attach_ct_meter(emu)
+    from .periph.p1 import attach_p1_meter
+    if attach_p1_meter(emu) is None:
+        attach_ct_meter(emu)
 
 
 register(Profile(

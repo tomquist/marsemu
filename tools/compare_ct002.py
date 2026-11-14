@@ -1,9 +1,10 @@
-"""Answer the same battery polls with the real CT002 firmware and with
+"""Answer the same battery polls with the real CT002 or CT003 firmware and with
 AstraMeter's CT002, on the same grid, and compare the replies field by field.
 
-The firmware runs in the emulator with its metering chip modelled
-(``marsemu/periph/bl_spi.py``): the grid power per phase goes into the chip's
-power registers, and the firmware reads them the way it reads a real chip.
+The firmware runs in the emulator with what it measures modelled: the CT002's
+metering chip (``marsemu/periph/bl_spi.py``), whose power registers get the
+grid per phase, or the CT003's P1 port (``marsemu/periph/p1.py``), which gets a
+DSMR telegram a second.
 AstraMeter's ``CT002`` runs in the same process with ``active_control`` off
 (a CT that reports, not one that steers), on the emulator's clock, and reads
 the same grid from its ``before_send`` hook.
@@ -104,7 +105,7 @@ def main() -> int:
     emu = Emulator(open(args.firmware, "rb").read())
     meter = getattr(emu, "ct_meter", None)
     if meter is None:
-        print("this image has no modelled metering chip (only the CT002, HME-4, has one)", file=sys.stderr)
+        print("this image is not a CT002 or CT003", file=sys.stderr)
         return 2
     mod = emu.fc41d
     ct_id = mod.cfg.ble_mac.replace(":", "").lower()
@@ -135,7 +136,10 @@ def main() -> int:
     emu.run(3.0)
     t0 = emu.time
 
-    ct = CT002(ct_mac=ct_id, ct_type="HME-4", active_control=False, clock=lambda: 1.7e9 + emu.time)
+    from marsemu.periph.p1 import P1Meter
+    ct_type = "HME-3" if isinstance(meter, P1Meter) else "HME-4"
+    print(f"meter: {ct_type} ({type(meter).__name__})", file=sys.stderr)
+    ct = CT002(ct_mac=ct_id, ct_type=ct_type, active_control=False, clock=lambda: 1.7e9 + emu.time)
     state = {"grid": grid_at(0)}
 
     async def before_send(addr, request, consumer_id):
@@ -171,7 +175,7 @@ def main() -> int:
             if st is None or st[0] is None:
                 continue
             phase, w = st
-            data = ct_payload([b.kind, b.mac, "HME-4", ct_id, phase, str(int(w))])
+            data = ct_payload([b.kind, b.mac, ct_type, ct_id, phase, str(int(w))])
             addr = (f"192.168.1.{60 + k}", 12345)
             n_before = len(fw_replies[b.mac])
             sid = service()

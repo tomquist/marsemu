@@ -237,17 +237,29 @@ AstraMeter's steering model on every step, the charge from an export and the
 steers on the next poll with the reading taken during the probe and swings to
 the opposite of the probe for 2–6 s, which the model does later and shorter.
 
-### The meter side: the CT002's own firmware against AstraMeter's CT002
+### The meter side: the CT002 and CT003 firmware against AstraMeter's CT002
 
-The CT002 (HME-4) measures with a Belling BL09xx metering chip that its
-firmware drives over bit-banged SPI (`marsemu/periph/bl_spi.py`). marsemu
-models the chip, so the meter's firmware sees whatever grid power you give its
-clamps: `emu.ct_meter.set_power(a, b, c)` in watts per phase. Phase power is
-registers 0x22–0x24 at 134.193 counts per watt; the firmware cuts each phase
-to whole watts and adds the unrounded phases for the total. The RMS currents,
-voltages and energy counters only reach its cloud report (every 300 s) and
-are not mapped yet. The CT003 (HME-3) measures some other way and is not
-modelled.
+The meters' firmware sees whatever grid you give it through `emu.ct_meter`.
+Both models take `emu.ct_meter.set_power(a, b, c)`, in watts per phase.
+
+* **CT002 (HME-4)** measures with clamps and a Belling BL09xx metering chip.
+  Its firmware drives the chip over bit-banged SPI (`marsemu/periph/bl_spi.py`).
+  * Phase power is registers 0x22–0x24, at 134.193 counts per watt.
+  * The firmware cuts each phase to whole watts and adds the unrounded phases
+    for the total.
+  * The RMS currents, voltages and energy counters only reach its cloud report
+    (every 300 s). They are not mapped yet.
+* **CT003 (HME-3)** is a P1 reader: it parses the utility meter's DSMR
+  telegrams (`marsemu/periph/p1.py`).
+  * It waits for its P1 line (PB11, USART3's receive pin) to idle high for 2 s,
+    which means a meter is connected.
+  * Then it reads USART3 at 115200 baud, from `/` to `!`.
+  * It picks out total and per-phase import and export power (`1-0:1.7.0`,
+    `2.7.0`, `21.7.0`/`22.7.0`, `41.7.0`/`42.7.0`, `61.7.0`/`62.7.0`) and the
+    four tariff energy registers (`1.8.1`, `1.8.2`, `2.8.1`, `2.8.2`). The
+    energy registers go into reply fields 25–28.
+  * The model sends a DSMR 5 telegram every second with the power you set and
+    the energy it adds up to. `set_connected(False)` unplugs it.
 
 `tools/compare_ct002.py` puts AstraMeter's `CT002` (with `active_control`
 off, so it reports and doesn't steer) next to the firmware in one process, on

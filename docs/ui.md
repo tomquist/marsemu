@@ -36,7 +36,7 @@ with a BMS image of their own take it too.
 | **Venus A** | control (VNSA) + BMS | the SH36735 front end and 13 cells, the inverter with its four PV inputs; stacked packs |
 | **Jupiter C/E, C Plus** | control (`jupiter`), BMS optional | the inverter and MPPT models; the C Plus's real BMS firmware with its image, else the BMS model (Pylontech-style frames) |
 | **Venus C/E** | control (`venus`, HMG) + BMS | the control MCU runs the power stage itself: the LLC, the DC bus, the bridge and the grid relay it drives, the BMS firmware on CAN. It runs at about a sixth of real time |
-| **CT002 / CT003** | one (`ct00x`) | the meter's firmware answering virtual batteries that poll it over UDP (how many, and what power they report, are controls). On a CT002 the clamps see the house load, spread over the three phases, minus what each battery delivers, through a model of its metering chip; the CT003's measurement is not modelled (0 W) |
+| **CT002 / CT003** | one (`ct00x`) | the meter's firmware answering virtual batteries that poll it over UDP (how many, and what power they report, are controls). The grid it measures is the house load, spread over the three phases, minus what each battery delivers: on a CT002 through a model of its metering chip, on a CT003 (a P1 reader) as the utility meter's telegrams on its P1 port |
 
 On every CAN device the internal bus is decoded: setpoints and limits to
 the inverter, its replies, the MPPT's status, and what the BMS reports
