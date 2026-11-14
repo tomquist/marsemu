@@ -647,9 +647,9 @@ function renderVenus() {
   V.mcuB.textContent = `${sgn(inv.reference)} W`;
   V.mcuC.textContent = "setpoint to inverter";
   V.mcuD.textContent = `IRQ ${(irq / 1000).toFixed(2)}k/s · CAN ${SN.can.frames}`;
-  if (V.eep) V.eep.textContent = "settings and statistics";
+  if (V.eep) V.eep.textContent = "settings, statistics";
   if (V.rs) {
-    V.rs.textContent = "slave 1, the firmware's"; V.rs2.textContent = "register map";
+    V.rs.textContent = "slave 1"; V.rs2.textContent = "firmware's registers";
     V.modbus.textContent = "Modbus TCP via"; V.modbus2.textContent = "marsemu --modbus-port";
   }
   if (mp && V.mppt) {
