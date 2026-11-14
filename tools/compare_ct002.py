@@ -206,7 +206,7 @@ def main() -> int:
         # grid step, or a battery changing what it reports, in between (or just
         # before the poll, for the grid) makes the two answers differ by timing
         moving = settle_window(p["t"], args.settle) or any(
-            p["t"] < start <= p["t"] + (p["fw_delay"] or 0) for start in events)
+            p["t"] <= start <= p["t"] + (p["fw_delay"] or 0) for start in events)
         for i, name in enumerate(FIELDS):
             if name in IGNORED:
                 continue

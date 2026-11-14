@@ -236,3 +236,38 @@ AstraMeter's steering model on every step, the charge from an export and the
 800 W cap. The main difference is just after phase detection: the firmware
 steers on the next poll with the reading taken during the probe and swings to
 the opposite of the probe for 2–6 s, which the model does later and shorter.
+
+### The meter side: the CT002's own firmware against AstraMeter's CT002
+
+The CT002 (HME-4) measures with a Belling BL09xx metering chip that its
+firmware drives over bit-banged SPI (`marsemu/periph/bl_spi.py`). marsemu
+models the chip, so the meter's firmware sees whatever grid power you give its
+clamps: `emu.ct_meter.set_power(a, b, c)` in watts per phase. Phase power is
+registers 0x22–0x24 at 134.193 counts per watt; the firmware cuts each phase
+to whole watts and adds the unrounded phases for the total. The RMS currents,
+voltages and energy counters only reach its cloud report (every 300 s) and
+are not mapped yet. The CT003 (HME-3) measures some other way and is not
+modelled.
+
+`tools/compare_ct002.py` puts AstraMeter's `CT002` (with `active_control`
+off, so it reports and doesn't steer) next to the firmware in one process, on
+the emulator's clock. It sends both the same polls from three batteries over a
+280 s scenario: grid steps, imports and exports, a battery changing phase, an
+inspection-mode reporter, the combined `D` phase, and a battery that goes
+quiet for 40 s. Then it compares every reply field:
+
+```bash
+python tools/compare_ct002.py CT002.bin --astrameter /path/to/AstraMeter/src [--json polls.json]
+```
+
+Against CT002 V124 and AstraMeter at the time of writing, all 589 replies agree
+on every field (phase and total power, batteries per phase, charge and
+discharge sums, the energy fields) except:
+
+* **Reply timing.** The firmware answers 0.5–1.5 s after a poll (median
+  0.7 s), with what it knows by then, while AstraMeter answers at once. A grid
+  step, or another battery's new report, inside that window shows up in one
+  answer and not the other. The tool counts these as transition.
+* **A battery that goes quiet.** The firmware still counted the silent battery,
+  with its last reported power, when it came back 40 s later. AstraMeter's
+  adaptive eviction drops it after about two of its poll periods.
