@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from .session import SESSION_TYPES, B2500Session
+from .session import PAIRED_TYPES, SESSION_TYPES, DeviceSession
 
 log = logging.getLogger("marsemu.ui")
 
@@ -54,7 +54,7 @@ class UiApp:
         self.meter = meter
         self.defaults = dict(defaults or {})
         self.allow_upload = allow_upload
-        self.session: Optional[B2500Session] = None
+        self.session: Optional[DeviceSession] = None
         self.lock = threading.Lock()
         self.message: Optional[str] = None
         os.makedirs(firmware_dir, exist_ok=True)
@@ -75,10 +75,7 @@ class UiApp:
                     info = image_info(path)
                 except Exception as exc:                         # noqa: BLE001 - shown to the user
                     info = {"profile": None, "error": str(exc)}
-                self._info[key] = {"name": name, "size": st.st_size, "profile": info.get("profile"),
-                                   "supported": info.get("profile") in SESSION_TYPES,
-                                   "device_type": info.get("device_type_default"),
-                                   "error": info.get("error")}
+                self._info[key] = describe(name, st.st_size, info)
             out.append(self._info[key])
         return out
 
@@ -98,22 +95,31 @@ class UiApp:
 
     # ---------------------------------------------------------------- device
     def start(self, opts: dict) -> dict:
+        images = self.images()
         name = os.path.basename(str(opts.get("image", "")))
-        info = next((i for i in self.images() if i["name"] == name), None)
+        info = next((i for i in images if i["name"] == name), None)
         if info is None:
             raise FileNotFoundError(f"no image {name!r} in the firmware folder")
         if not info["supported"]:
-            raise ValueError(f"{name}: profile {info['profile']} is not in the dashboard yet (B2500 only for now)")
-        o = {**self.defaults, **{k: v for k, v in opts.items() if k != "image"}}
-        cls = SESSION_TYPES[info["profile"]]
-        self.stop()
-        state = os.path.join(self.state_dir, os.path.splitext(name)[0]) if self.state_dir else None
-        sess = cls(os.path.join(self.firmware_dir, name),
-                   pv=o.get("pv", (300.0, 300.0)), load=float(o.get("load", 400.0)), soc=float(o.get("soc", 50.0)),
-                   ambient_c=float(o.get("ambient", 22.0)), extension_packs=int(o.get("extension_packs", 0)),
-                   state_dir=state, network=self.network() if self.network else None, meter=self.meter,
-                   speed=float(o.get("speed", 1.0)), device_type=o.get("device_type") or None,
-                   setup=bool(o.get("setup", True)))
+            raise ValueError(f"{name}: {info['profile']} is not in the dashboard yet")
+        o = {**self.defaults, **{k: v for k, v in opts.items() if k not in ("image", "bms") and v is not None}}
+        common = dict(load=float(o.get("load", 400.0)), soc=float(o.get("soc", 50.0)),
+                      ambient_c=float(o.get("ambient", 22.0)), network=self.network() if self.network else None,
+                      meter=self.meter, speed=float(o.get("speed", 1.0)), device_type=o.get("device_type") or None,
+                      setup=bool(o.get("setup", True)),
+                      state_dir=os.path.join(self.state_dir, os.path.splitext(name)[0]) if self.state_dir else None)
+        if info["needs_bms"]:
+            bms = os.path.basename(str(opts.get("bms") or ""))
+            if not any(i["name"] == bms and i["role"] == "bms" for i in images):
+                raise ValueError(f"{info['model']} needs its BMS image too: add it and pick it")
+            cls = PAIRED_TYPES[info["profile"]][0]
+            self.stop()
+            sess = cls(os.path.join(self.firmware_dir, name), bms=os.path.join(self.firmware_dir, bms), **common)
+        else:
+            cls = SESSION_TYPES[info["profile"]]
+            self.stop()
+            sess = cls(os.path.join(self.firmware_dir, name), pv=o.get("pv", (300.0, 300.0)),
+                       extension_packs=int(o.get("extension_packs", 0)), **common)
         with self.lock:
             self.session = sess
         sess.start()
@@ -131,6 +137,24 @@ class UiApp:
         return {"images": self.images(), "running": s is not None, "upload": self.allow_upload,
                 "image": os.path.basename(s.firmware) if s else None,
                 "snapshot": s.read(10 ** 12, 10 ** 12)["snapshot"] if s else None}
+
+
+def describe(name: str, size: int, info: dict) -> dict:
+    """An image as the start screen lists it: which device it runs, or that it is a BMS image."""
+    profile, types = info.get("profile"), info.get("device_types") or []
+    d = {"name": name, "size": size, "profile": profile, "device_type": info.get("device_type_default"),
+         "error": info.get("error"), "role": "device", "model": None, "supported": False, "needs_bms": False}
+    if profile in SESSION_TYPES:
+        d.update(model=SESSION_TYPES[profile].MODEL, supported=True)
+    elif profile in PAIRED_TYPES:
+        cls, covered = PAIRED_TYPES[profile]
+        hit = next((t for t in covered if t in types), None)
+        # a control image lists the types it serves; the file name tells the variant apart
+        if hit and not re.search(r"VNS[AD]", name, re.I):
+            d.update(model=cls.MODEL, supported=True, needs_bms=True, device_type=hit)
+    elif profile == "aux":
+        d["role"] = "bms"
+    return d
 
 
 def make_handler(app: UiApp):

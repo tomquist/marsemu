@@ -85,3 +85,29 @@ def test_stream_says_hello(server):
         assert resp.headers.get("Content-Type") == "text/event-stream"
         assert resp.readline() == b"event: hello\n"
         assert json.loads(resp.readline()[len(b"data: "):])["running"] is False
+
+
+def test_venus_can_frames_are_decoded():
+    import struct
+    from marsemu.ui.session import decode_venus_can
+    assert decode_venus_can(0x1801FFAA, b"", "control")[0] == "control→BMS"
+    d, label, text = decode_venus_can(0x1801AA01, struct.pack("<HhhH", 5281, -118, 250, 535), "bms")
+    assert d == "BMS→control" and "52.81 V" in text and "-11.8 A" in text and "SOC 53.5 %" in text
+    d, label, text = decode_venus_can(0x140141 << 8 | 0x01, struct.pack("<i", 600), "control")
+    assert d == "control→inverter" and label == "setpoint" and "600 W" in text
+    d, label, text = decode_venus_can(0x01410101, struct.pack("<i", 600), "micro")
+    assert d == "inverter→control" and "echo 600 W" in text
+    d, label, text = decode_venus_can(0x1830AA01, struct.pack("<4H", 3299, 3300, 3301, 3302), "bms")
+    assert d == "BMS→control" and "cells 1–4: 3299 mV" in text
+    assert decode_venus_can(0x1841AA01, bytes(8), "bms")[0] == "BMS→control"
+
+
+def test_images_are_classified():
+    from marsemu.ui.server import describe
+    b = describe("b.bin", 1, {"profile": "b2500-v3", "device_type_default": "HMJ-2"})
+    assert b["supported"] and b["model"] == "B2500" and not b["needs_bms"]
+    v = describe("151_control_VNSE3-0.bin", 1, {"profile": "venus3", "device_types": ["HME-4", "VNSE3-0"]})
+    assert v["supported"] and v["model"] == "Venus E 3.0" and v["needs_bms"]
+    d = describe("151_control_VNSD-0.bin", 1, {"profile": "venus3", "device_types": ["VNSD-0", "VNSE3-0"]})
+    assert not d["supported"]
+    assert describe("115_bms.bin", 1, {"profile": "aux"})["role"] == "bms"

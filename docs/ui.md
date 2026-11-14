@@ -20,17 +20,30 @@ data from the running firmware:
   message (AT commands, MQTT, CT polls, the extension bus, the front end),
   with filters.
 - **Controls.** House load, sun on each PV input, ambient temperature,
-  scenarios (load step, passing cloud, solar surplus), faults (Wi‑Fi down,
+  scenarios (load step; on the B2500 a passing cloud and solar surplus, on the
+  Venus a house that exports), faults (Wi‑Fi down,
   CT002 offline, pack over-temperature), a status poll (`cd=1`), pause, step
   and a speed limit.
 
-Only the B2500 for now (every profile that `marsemu info` reports as
-`b2500-v1`, `-v2` or `-v3`); the other devices follow.
+Two devices for now:
+
+- **B2500** (every image `marsemu info` reports as `b2500-v1`, `-v2` or `-v3`):
+  the one MCU, the SH367309 front end and 14 cells, both PV inputs, both
+  outputs and the microinverter, extension packs on UART5.
+- **Venus E 3.0** (a `venus3` control image for the E 3.0, plus its BMS
+  image): the control and the BMS firmware (the BMS in its own process), the
+  KA495XX front end and 16 cells, and the inverter board model. The internal
+  CAN bus is decoded: setpoints and limits to the inverter board, its
+  replies, and the BMS's voltage, current, SOC, limits, protection, cells and
+  temperatures.
+
+The other devices follow.
 
 ## Running it
 
 ```bash
 marsemu ui B2500.bin                         # start this image; http://127.0.0.1:8080/
+marsemu ui --firmware-dir ~/venus            # a Venus E 3.0: pick the control image and its BMS image
 marsemu ui --firmware-dir ~/firmware         # pick an image (or drop one in) on the page
 marsemu ui B2500.bin --mqtt broker --broker 127.0.0.1:1883   # its MQTT session to your broker
 ```
@@ -82,9 +95,9 @@ prefix (Home Assistant's ingress).
 | `GET api/stream` | Server-sent events: `hello` (the state) once, then `tick` four times a second with the snapshot, new bus messages and new chart samples |
 | `POST api/control` | A command for the running device, e.g. `{"op": "load", "w": 800}`, `{"op": "pv", "w": [300, 200]}`, `{"op": "fault", "name": "wifi", "on": true}`, `{"op": "mqtt", "payload": "cd=1"}`, `{"op": "speed", "x": 0}`, `{"op": "pause", "on": true}`, `{"op": "step", "s": 1}`, `{"op": "scenario", "name": "cloud"}` |
 | `POST api/firmware?name=FILE` | Save the request body as a firmware image |
-| `POST api/start` | `{"image": "FILE", "pv": [W, W], "load": W, "soc": %}` |
+| `POST api/start` | `{"image": "FILE", "pv": [W, W], "load": W, "soc": %}`; a Venus also takes `"bms": "FILE"` |
 | `POST api/stop` | Stop the device |
 
-From Python, `marsemu.ui.session.B2500Session` is the same device without
-the web server: `command()` takes the same commands and `read()` returns the
+From Python, `marsemu.ui.session.B2500Session` and `VenusE3Session` are the
+same devices without the web server: `command()` takes the same commands and `read()` returns the
 same snapshot.

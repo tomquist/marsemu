@@ -210,7 +210,7 @@ table.regs td:first-child{color:var(--xray)}
 .ln .c{font-weight:600}
 .ln .x{overflow:hidden;text-overflow:ellipsis;color:var(--fg-dim)}
 .ln:hover .x{color:var(--fg)}
-.ch-I2C2{color:var(--i2c)} .ch-USART1{color:var(--uart)} .ch-RF{color:var(--rf)} .ch-MQTT{color:var(--rf)} .ch-UART5{color:var(--ext)} .ch-FW{color:var(--xray)} .ch-BLE{color:var(--rf)} .ch-EVT{color:var(--warn)} .ch-ALARM{color:var(--alarm)}
+.ch-I2C2{color:var(--i2c)} .ch-USART1{color:var(--uart)} .ch-UART6{color:var(--uart)} .ch-CAN{color:var(--ext)} .ch-RF{color:var(--rf)} .ch-MQTT{color:var(--rf)} .ch-UART5{color:var(--ext)} .ch-FW{color:var(--xray)} .ch-BLE{color:var(--rf)} .ch-EVT{color:var(--warn)} .ch-ALARM{color:var(--alarm)}
 
 @media (max-width:1180px){
   html,body{height:auto}
@@ -257,3 +257,5 @@ table.regs td:first-child{color:var(--xray)}
 .err{color:var(--alarm);font:500 12px var(--f-mono);min-height:1em}
 .empty{color:var(--fg-faint);font:400 12px var(--f-mono);padding:6px 2px}
 @media (max-width:720px){.opts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.bmspick{display:flex;flex-direction:column;gap:4px;font:500 12px var(--f-label);color:var(--fg-dim)}
+.bmspick select{background:var(--bg-2);border:1px solid var(--line-2);border-radius:3px;padding:6px 8px;font:500 12px var(--f-mono)}

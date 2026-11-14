@@ -37,8 +37,8 @@
     <div class="sect">
       <h3>Devices</h3>
       <div class="devs">
-        <div class="dev on" id="devB2500">B2500 <small id="devState">ready</small></div>
-        <div class="dev">Venus E 3.0 <small>planned</small></div>
+        <div class="dev" id="devB2500">B2500 <small id="devState">ready</small></div>
+        <div class="dev" id="devVenusE3">Venus E 3.0 <small id="devStateV">ready</small></div>
         <div class="dev">Venus D / A <small>planned</small></div>
         <div class="dev">Venus C/E <small>planned</small></div>
         <div class="dev">Jupiter <small>planned</small></div>
@@ -57,10 +57,10 @@
       <label class="tog">Bus traffic<input type="checkbox" id="dataTog" checked></label>
     </div>
     <div class="sect">
-      <h3>House and sun</h3>
+      <h3 id="houseHead">House and sun</h3>
       <div class="sl"><label for="sLoad">House load</label><output id="oLoad">400 W</output><input type="range" id="sLoad" min="0" max="2000" step="10" value="400"></div>
-      <div class="sl"><label for="sPv1">PV 1 available</label><output id="oPv1">300 W</output><input type="range" id="sPv1" min="0" max="500" step="5" value="300"></div>
-      <div class="sl"><label for="sPv2">PV 2 available</label><output id="oPv2">300 W</output><input type="range" id="sPv2" min="0" max="500" step="5" value="300"></div>
+      <div class="sl only-b2500"><label for="sPv1">PV 1 available</label><output id="oPv1">300 W</output><input type="range" id="sPv1" min="0" max="500" step="5" value="300"></div>
+      <div class="sl only-b2500"><label for="sPv2">PV 2 available</label><output id="oPv2">300 W</output><input type="range" id="sPv2" min="0" max="500" step="5" value="300"></div>
       <div class="sl"><label for="sAmb">Ambient</label><output id="oAmb">22 °C</output><input type="range" id="sAmb" min="-10" max="45" step="1" value="22"></div>
     </div>
     <div class="sect">
@@ -68,8 +68,9 @@
       <div class="row">
         <button class="btn" id="askBtn" title="what hm2mqtt does: cd=1 on the device's command topic">Ask for status (cd=1)</button>
         <button class="btn" id="scStep">Load step +800 W</button>
-        <button class="btn" id="scCloud">Passing cloud</button>
-        <button class="btn" id="scExport">Solar export</button>
+        <button class="btn only-b2500" id="scCloud">Passing cloud</button>
+        <button class="btn only-b2500" id="scExport">Solar surplus</button>
+        <button class="btn only-venus" id="scHouseExport">House exports 600 W</button>
       </div>
     </div>
     <div class="sect">
@@ -112,11 +113,7 @@
         </defs>
 
         <g id="boards">
-          <rect class="board" x="214" y="44" width="732" height="388" rx="8" style="fill:url(#pcb)"/>
-          <rect x="214" y="44" width="732" height="388" rx="8" fill="none" stroke="#1d3042"/>
-          <text class="ext-lab" x="226" y="62">MAIN BOARD</text>
-          <rect class="board" x="236" y="440" width="688" height="146" rx="8"/>
-          <text class="ext-lab" x="250" y="459">PACK · 14S LFP · 50 Ah · 2.24 kWh</text>
+          <g id="boardsDecor"></g>
           <g id="tracks"></g>
           <g id="flows"></g>
           <g id="sense"></g>
@@ -136,8 +133,8 @@
               <path d="M760 70h150M760 84h150M760 98h150M760 112h150M760 126h150M760 140h150"/>
             </g>
             <rect x="420" y="250" width="320" height="110" rx="10" fill="#0d151f" stroke="#2a3c52"/>
-            <text x="580" y="298" text-anchor="middle" style="font:600 28px var(--f-label);letter-spacing:.3em;fill:#5d748a">B2500</text>
-            <text x="580" y="326" text-anchor="middle" style="font:500 11px var(--f-mono);fill:#4c6276">HMJ-2 · 2.24 kWh · 800 W</text>
+            <text x="580" y="298" text-anchor="middle" style="font:600 28px var(--f-label);letter-spacing:.3em;fill:#5d748a" id="shellName">MARSEMU</text>
+            <text x="580" y="326" text-anchor="middle" style="font:500 11px var(--f-mono);fill:#4c6276" id="shellSub"></text>
             <circle cx="580" cy="400" r="22" fill="none" stroke="#24364a" stroke-width="5"/>
             <circle id="shellLed" cx="580" cy="400" r="22" fill="none" stroke="var(--ok)" stroke-width="5" stroke-dasharray="86 200" transform="rotate(-90 580 400)"/>
             <text x="580" y="404" text-anchor="middle" style="font:600 10px var(--f-mono);fill:var(--fg-dim)" id="shellSoc">62%</text>
@@ -163,21 +160,13 @@
           </g>
         </g>
       </svg>
-      <div class="legend" aria-hidden="true">
-        <span><i style="background:var(--solar)"></i>PV</span>
-        <span><i style="background:var(--charge)"></i>into the pack</span>
-        <span><i style="background:var(--discharge)"></i>toward the house</span>
-        <span><i style="background:var(--i2c)"></i>I2C2</span>
-        <span><i style="background:var(--uart)"></i>USART1</span>
-        <span><i style="background:var(--ext)"></i>UART5</span>
-        <span><i style="background:var(--analog)"></i>PWM / DAC / ADC</span>
-        <span><i style="background:var(--rf)"></i>Wi‑Fi / BLE</span>
-      </div>
+      <div class="legend" id="legend" aria-hidden="true"></div>
       <div class="start" id="start" hidden>
         <div class="card">
           <h2>Start a device</h2>
-          <p>Pick a firmware image, or add one. marsemu runs the image unmodified in an emulator and models the hardware around it. B2500 images for now; the other devices follow.</p>
+          <p>Pick a firmware image, or add one. marsemu runs the image unmodified in an emulator and models the hardware around it. The B2500 and the Venus E 3.0 for now; the other devices follow.</p>
           <div class="imgs" id="imgs"></div>
+          <label class="bmspick" id="bmsPick" hidden>BMS image (the Venus runs its BMS firmware too)<select id="bmsSel"></select></label>
           <div class="drop" id="drop" tabindex="0" role="button">Drop a firmware image here, or click to choose one<input type="file" id="file" accept=".bin" hidden></div>
           <div class="opts">
             <label>PV 1, W<input type="number" id="oPvA" value="300" min="0" max="500"></label>
