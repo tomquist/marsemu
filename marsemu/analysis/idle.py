@@ -154,10 +154,17 @@ def watchdog_reload_functions(image: bytes, base: int) -> list:
     return sorted(set(found))
 
 
-def _ram_base(insns, k_head, reg: str, image: bytes, base: int) -> Optional[int]:
-    """The literal a register was loaded with shortly before a loop, if any."""
-    for prev in reversed(insns[max(0, k_head - 12): k_head]):
-        if prev.op_str.split(",")[0] != reg:
+#: instructions whose first operand is read, not written
+_NO_DEST = ("str", "cmp", "cmn", "tst", "teq", "b", "cb", "push", "it")
+
+
+def _ram_base(insns, k_head, reg: str, image: bytes, base: int, k_use: Optional[int] = None) -> Optional[int]:
+    """The literal a register was loaded with before it is used at ``k_use``
+    (default: the loop head): searched back through the loop body and up to
+    12 instructions before the loop."""
+    end = k_head if k_use is None else k_use
+    for prev in reversed(insns[max(0, k_head - 12): end]):
+        if _strip(prev.mnemonic).startswith(_NO_DEST) or prev.op_str.split(",")[0] != reg:
             continue
         if _strip(prev.mnemonic) == "ldr" and "[pc" in prev.op_str:
             lt = _ldr_target(prev)
@@ -204,10 +211,10 @@ def find_watchdog_waits(image: bytes, base: int) -> list:
                    if x.op_str.startswith("#")):
                 break
             ok = True
-            for x in body:
+            for kx, x in zip(ks, body):
                 if _strip(x.mnemonic).startswith("ldr") and "[pc" not in x.op_str:
                     reg = x.op_str.split("[")[1].split(",")[0].rstrip("]").strip()
-                    addr = _ram_base(insns, ks[0], reg, image, base)
+                    addr = _ram_base(insns, ks[0], reg, image, base, k_use=kx)
                     if addr is None or not SRAM[0] <= addr < SRAM[1]:
                         ok = False
             if ok:

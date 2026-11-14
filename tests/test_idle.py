@@ -51,3 +51,23 @@ def test_loop_polling_a_peripheral_is_not():
 
 def test_no_watchdog_no_waits():
     assert find_watchdog_waits(b"\x00\xbf" * 64, BASE) == []
+
+
+def test_counter_address_loaded_inside_the_loop():
+    """The B2500 V232 form: the counter's address is loaded inside the loop, and
+    a store just before it uses the same register (a store does not set it)."""
+    code = image(0x20000100)[:0x10] + b"".join([
+        struct.pack("<H", 0x2000),               # 10 movs r0, #0
+        struct.pack("<H", 0x4905),               # 12 ldr  r1, [pc, #20]     (counter)
+        struct.pack("<H", 0x8008),               # 14 strh r0, [r1]          (counter = 0)
+        struct.pack("<H", 0xE001),               # 16 b    0x1c
+        bl(BASE + 0x18, BASE + 0x00),            # 18 bl   IWDG_ReloadCounter
+        struct.pack("<H", 0x4802),               # 1c ldr  r0, [pc, #8]      (counter)
+        struct.pack("<H", 0x8800),               # 1e ldrh r0, [r0]
+        struct.pack("<H", 0x42A0),               # 20 cmp  r0, r4
+        struct.pack("<H", 0xDBF9),               # 22 blt  0x18
+        struct.pack("<H", 0x4770),               # 24 bx   lr
+        struct.pack("<H", 0xBF00),               # 26 nop
+        struct.pack("<I", 0x20000100),           # 28 literal: the counter
+    ]) + b"\xff" * 0x40
+    assert find_watchdog_waits(code, BASE) == [BASE + 0x18]
