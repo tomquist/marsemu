@@ -109,13 +109,13 @@ def main() -> int:
     mod = emu.fc41d
     ct_id = mod.cfg.ble_mac.replace(":", "").lower()
 
-    fw_replies: Dict[str, List[list]] = defaultdict(list)
+    fw_replies: Dict[str, List[tuple]] = defaultdict(list)     # mac -> [(emulated time, fields)]
     orig_send = mod.net.socket_send
 
     def send(s, data, extra):
         f = ct_fields(bytes(data))
         if f and len(f) > 4:
-            fw_replies[f[3]].append(f)
+            fw_replies[f[3]].append((emu.time, f))
         return orig_send(s, data, extra)
     mod.net.socket_send = send
 
@@ -125,6 +125,7 @@ def main() -> int:
                 return sid
         return None
 
+    meter.set_power(*grid_at(0))                 # the grid is there from power-on
     print("booting the CT002 firmware ...", file=sys.stderr)
     while service() is None and emu.time < 90:
         emu.run(1.0)
@@ -183,7 +184,11 @@ def main() -> int:
     # the firmware's answer to a poll is its next reply to that battery after it
     for p in polls:
         got = fw_replies[p["mac"]]
-        p["fw"] = got[p["fw_index"]] if len(got) > p["fw_index"] else None
+        if len(got) > p["fw_index"]:
+            t_reply, p["fw"] = got[p["fw_index"]]
+            p["fw_delay"] = round(t_reply - t0 - p["t"], 3)
+        else:
+            p["fw"], p["fw_delay"] = None, None
 
     agree = defaultdict(int)
     differ = defaultdict(int)
@@ -195,7 +200,9 @@ def main() -> int:
         if fw is None or aa is None:
             missing["fw" if fw is None else "astra"] += 1
             continue
-        moving = settle_window(p["t"], args.settle)
+        # a step between the poll and the firmware's reply, or just before the poll
+        moving = settle_window(p["t"], args.settle) or any(
+            p["t"] < start <= p["t"] + (p["fw_delay"] or 0) for start, _ in GRID[1:])
         for i, name in enumerate(FIELDS):
             if name in IGNORED:
                 continue
@@ -213,6 +220,10 @@ def main() -> int:
     n = sum(1 for p in polls if p["fw"] is not None and p["astra"] is not None)
     print(f"{len(polls)} polls, {n} answered by both; no firmware reply to {missing['fw']},"
           f" no AstraMeter reply to {missing['astra']}")
+    delays = sorted(p["fw_delay"] for p in polls if p.get("fw_delay") is not None)
+    if delays:
+        print(f"firmware reply delay: median {delays[len(delays) // 2] * 1000:.0f} ms,"
+              f" max {delays[-1] * 1000:.0f} ms (AstraMeter answers at once)")
     print(f"{'field':<14}{'agree':>7}{'differ':>8}{'in transition':>15}")
     for name in FIELDS:
         if name in IGNORED:
