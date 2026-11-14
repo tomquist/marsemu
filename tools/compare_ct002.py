@@ -190,6 +190,7 @@ def main() -> int:
         else:
             p["fw"], p["fw_delay"] = None, None
 
+    events = sorted({start for start, _ in GRID[1:]} | {start for b in bats for start, _, _ in b.plan[1:]})
     agree = defaultdict(int)
     differ = defaultdict(int)
     transient = defaultdict(int)
@@ -200,9 +201,11 @@ def main() -> int:
         if fw is None or aa is None:
             missing["fw" if fw is None else "astra"] += 1
             continue
-        # a step between the poll and the firmware's reply, or just before the poll
+        # the firmware answers 0.5-1.5 s after a poll, with what it knows then: a
+        # grid step, or a battery changing what it reports, in between (or just
+        # before the poll, for the grid) makes the two answers differ by timing
         moving = settle_window(p["t"], args.settle) or any(
-            p["t"] < start <= p["t"] + (p["fw_delay"] or 0) for start, _ in GRID[1:])
+            p["t"] < start <= p["t"] + (p["fw_delay"] or 0) for start in events)
         for i, name in enumerate(FIELDS):
             if name in IGNORED:
                 continue
