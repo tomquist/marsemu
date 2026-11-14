@@ -300,7 +300,7 @@ def make_handler(app: UiApp):
                         time.sleep(0.25)
                     else:
                         now = time.monotonic()
-                        if now - last_idle > 15:
+                        if now - last_idle > 3:              # a heartbeat: the page reconnects a quiet stream
                             send("idle", {"images": app.images()})
                             last_idle = now
                         time.sleep(0.5)

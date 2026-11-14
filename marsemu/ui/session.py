@@ -1001,6 +1001,43 @@ class CtSession(DeviceSession):
         self.clamps = getattr(self.emu, "ct_meter", None)
         if self.clamps is not None:
             self.dev.sim.every(0.2, self._feed_clamps)
+        from ..periph.p1 import P1Meter
+        if isinstance(self.clamps, P1Meter):
+            # the CT003 reads the utility meter's telegrams on USART3: log each one
+            self.CHANNELS = self.CHANNELS[:2] + ("P1",) + self.CHANNELS[2:]
+            self.clamps.listeners.append(self._log_telegram)
+        elif self.clamps is not None:
+            # the CT002 reads its metering chip five times a second: log what it read every 2 s
+            self.CHANNELS = self.CHANNELS[:2] + ("SPI",) + self.CHANNELS[2:]
+            self._spi_reads = 0
+            self.clamps.chip.on_read.append(self._count_spi)
+            self.dev.sim.every(2.0, self._log_spi)
+
+    #: the OBIS lines the CT003's firmware parses
+    P1_LINES = ("1-0:1.7.0", "1-0:2.7.0", "1-0:21.7.0", "1-0:22.7.0", "1-0:41.7.0", "1-0:42.7.0",
+                "1-0:61.7.0", "1-0:62.7.0", "1-0:1.8.1", "1-0:1.8.2", "1-0:2.8.1", "1-0:2.8.2")
+
+    def _log_telegram(self, data: bytes) -> None:
+        lines = data.decode("ascii", "replace").split("\r\n")
+        head = lines[0] if lines else "/"
+        obis = [ln for ln in lines if ln.startswith(self.P1_LINES)]
+        self._log("P1", "meter→CT", f"{head}  " + "  ".join(obis) + f"  ({len(data)} bytes, {lines[-2] if len(lines) > 1 else ''})")
+
+    def _count_spi(self, addr: int) -> None:
+        self._spi_reads += 1
+
+    def _log_spi(self, now: float) -> None:
+        if not self._spi_reads:
+            return
+        regs = self.clamps.chip.regs
+
+        def watts(addr: int) -> str:
+            v = regs.get(addr, 0)
+            v = v - (1 << 24) if v & 0x800000 else v
+            return f"{v} ({v / self.clamps.COUNTS_PER_W:+.0f} W)"
+        self._log("SPI", "BL09xx→MCU", f"0x22 {watts(0x22)}  0x23 {watts(0x23)}  0x24 {watts(0x24)}"
+                  f"  · {self._spi_reads} register reads in 2 s")
+        self._spi_reads = 0
 
     def clamp_power(self) -> Dict[str, float]:
         """Grid per phase as the clamps see it: house load minus battery output."""

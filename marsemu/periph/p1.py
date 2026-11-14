@@ -84,6 +84,8 @@ class P1Meter:
         self.tariff = 1
         self.sent = 0
         self.connected = True
+        #: called with each telegram as it goes out
+        self.listeners = []
         self._sense = self.m.bus.get(sense[0]), sense[1]
         self._sense[0].inputs[self._sense[1]] = 1          # the data line idles high: a meter is there
         self.m.clock.after(int(period_s * self.m.clock.hz), self._tick, "p1-telegram")
@@ -108,8 +110,11 @@ class P1Meter:
         if not self.connected or not self.uart.rx_enabled() or len(self.uart.rx) > 64:
             return                                          # nobody listening yet: the meter's bytes are lost
         p = self.power
-        self.uart.inject(telegram(p["A"], p["B"], p["C"], self.energy_kwh, self.tariff))
+        data = telegram(p["A"], p["B"], p["C"], self.energy_kwh, self.tariff)
+        self.uart.inject(data)
         self.sent += 1
+        for fn in self.listeners:
+            fn(data)
 
 
 def attach_p1_meter(emu) -> Optional[P1Meter]:

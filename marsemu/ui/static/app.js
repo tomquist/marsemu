@@ -39,9 +39,12 @@ const S = {
   pbat: 0, packV: 0, I: 0, soc: 0, cells: new Array(16).fill(3.3), bal: new Array(16).fill(false),
   fets: { chg: true, dsg: true }, temp: 22, hs: 25, f: { wifi: false, ct: false, heat: false }, ext: [],
 };
+let layoutKey = "";
 function fromSnap(sn) {
   SN = sn;
-  if (sn.model !== MODEL) buildLayout(sn.model, sn.channels);
+  // a CT002 and a CT003 share the model but not the drawing: the meter's source picks it
+  const key = sn.model + "|" + (sn.meter ? sn.meter.source : "");
+  if (sn.model !== MODEL || key !== layoutKey) { layoutKey = key; buildLayout(sn.model, sn.channels); }
   S.t = sn.t; S.load = sn.load; S.grid = sn.grid; S.ac = sn.ac; S.f = sn.faults; S.ext = sn.ext || [];
   if (!sn.pack) {                       // the CT meter: no pack, no house of its own
     S.pbat = 0; S.packV = 0; S.I = 0; S.soc = 0; S.cells = []; S.bal = []; S.temp = 0;
@@ -418,13 +421,16 @@ function buildVenusCE() {
 
 /* ---- CT002 / CT003: the meter, polled by virtual batteries */
 function buildCt() {
+  // the CT003 reads a utility meter's P1 port; the CT002 measures with clamps and a metering chip
+  const p1 = !!(SN && SN.meter && SN.meter.source === "p1");
+  const ph = p1 ? ["L1 · P1", "L2 · P1", "L3 · P1"] : ["CLAMP A", "CLAMP B", "CLAMP C"];
   CELLS = 0;
   COMP = {
     mcu: { x: 480, y: 120, w: 170, h: 150, t: "STM32F0 · METER", kind: "real" },
     flash: { x: 290, y: 104, w: 130, h: 50, t: "SPI FLASH", kind: "model" },
-    clampA: { x: 280, y: 420, w: 140, h: 60, t: "CLAMP A", kind: "model" },
-    clampB: { x: 470, y: 420, w: 140, h: 60, t: "CLAMP B", kind: "model" },
-    clampC: { x: 660, y: 420, w: 140, h: 60, t: "CLAMP C", kind: "model" },
+    clampA: { x: 280, y: 420, w: 140, h: 60, t: ph[0], kind: "model" },
+    clampB: { x: 470, y: 420, w: 140, h: 60, t: ph[1], kind: "model" },
+    clampC: { x: 660, y: 420, w: 140, h: 60, t: ph[2], kind: "model" },
     fc41d: OUTSIDE.fc41d, broker: OUTSIDE.broker, phone: OUTSIDE.phone,
   };
   for (let k = 0; k < 3; k++) COMP["bat" + (k + 1)] = { x: 1010, y: 110 + k * 120, w: 170, h: 90, t: `BATTERY ${k + 1}`, kind: "ext" };
@@ -432,29 +438,30 @@ function buildCt() {
   DATA = {
     usart: { d: "M480 140H452V58H470", c: "uart" },
     spi: { d: "M480 129H420", c: "i2c" },
-    adcA: { d: "M350 420V300H500V270", c: "ana" },
-    adcB: { d: "M540 420V270", c: "ana" },
-    adcC: { d: "M730 420V300H600V270", c: "ana" },
+    adcA: { d: "M350 420V300H500V270", c: p1 ? "uart" : "ana" },
+    adcB: { d: "M540 420V270", c: p1 ? "uart" : "ana" },
+    adcC: { d: "M730 420V300H600V270", c: p1 ? "uart" : "ana" },
     rfbroker: RF.rfbroker, rfphone: RF.rfphone,
     rfbat1: { d: "M545 0C760 -20 930 40 1010 150", c: "rf", rf: true },
     rfbat2: { d: "M545 0C800 0 940 150 1010 270", c: "rf", rf: true },
     rfbat3: { d: "M545 0C830 20 950 260 1010 390", c: "rf", rf: true },
   };
   board(214, 44, 520, 270, "METER BOARD");
-  board(236, 400, 600, 100, "CURRENT CLAMPS · NOT MODELLED");
+  board(236, 400, 600, 100, p1 ? "UTILITY METER · P1 PORT → USART3 · DSMR 5, A TELEGRAM A SECOND"
+    : "CURRENT CLAMPS → BL09xx METERING CHIP → BIT-BANGED SPI");
   el("text", { class: "ext-lab", x: 230, y: 552 }, boardsDecor, "GRID");
   el("text", { class: "ext-lab", x: 930, y: 552, "text-anchor": "end" }, boardsDecor, "HOUSE");
   drawPaths();
   Object.keys(COMP).forEach(comp);
-  chip("mcu", "CT002");
+  chip("mcu", p1 ? "CT003" : "CT002");
   V.flash = valText("flash", 9, 34, "sub"); V.flash2 = valText("flash", 9, 46, "sub");
   for (const k of ["A", "B", "C"]) { V["cl" + k] = valText("clamp" + k, 9, 36); V["cl" + k + "2"] = valText("clamp" + k, 9, 50, "sub"); }
   for (let k = 1; k <= 3; k++) { V["bat" + k] = valText("bat" + k, 9, 38); V["bat" + k + "s"] = valText("bat" + k, 9, 56, "sub"); V["bat" + k + "t"] = valText("bat" + k, 9, 72, "sub"); }
   V.fc = valText("fc41d", 9, 34, "sub");
   V.broker = valText("broker", 9, 33, "sub"); V.phone = valText("phone", 9, 33, "sub");
-  silBox(487, 160, 156, 70, ["USART1 · SPI2 · ADC", "", "", "", "", ""], "mcu");
+  silBox(487, 160, 156, 70, [p1 ? "USART1 · USART3 (P1)" : "USART1 · SPI (BL09xx)", "", "", "", "", ""], "mcu");
   silBox(624, 10, 120, 24, ["", ""], "fc");
-  [["USART1 · AT", 412, 54], ["ADC", 520, 300]].forEach(([t, x, y]) => el("text", { class: "sil dim", x, y }, silG, t));
+  [["USART1 · AT", 412, 54], [p1 ? "USART3 · P1 · 115200" : "SPI · BL09xx 0x22–24", 520, 300]].forEach(([t, x, y]) => el("text", { class: "sil dim", x, y }, silG, t));
 }
 
 const LAYOUTS = {
@@ -520,6 +527,8 @@ function capsuleFor(ev) {
       return capsule("rfbat" + mac, d === "battery→CT" ? -1 : 1, d === "battery→CT" ? "poll" : "answer");
     }
     case "I2C2": return capsule("i2c", -1, "CELL×14");
+    case "P1": return capsule("adcB", 1, "telegram");
+    case "SPI": return capsule("adcB", 1, "0x22–24");
     case "BLE": return capsule("rfphone", 1, "BLE");
   }
 }
@@ -923,7 +932,7 @@ const TITLES = {
   "CT002 / CT003": { mcu: ["STM32F0 meter", "Runs the unmodified CT firmware: answers the batteries' UDP polls, reports over MQTT and HTTP.", "real"] },
 };
 const CHMAP_V = { mcu: null, fc41d: ["UART6", "USART1", "LPUART1", "UDP", "MQTT", "RF", "BLE"], mppt: ["CAN"], relay: ["FW"], bridge: ["FW"], dcbus: ["FW"], llc: ["FW"],
-  flash: ["FW"], clampA: ["UDP"], clampB: ["UDP"], clampC: ["UDP"], bat1: ["UDP"], bat2: ["UDP"], bat3: ["UDP"], micro: ["CAN"], bms: ["CAN", "ALARM"], afe: ["CAN"], pack: ["CAN", "ALARM"], fets: ["CAN", "ALARM"], eeprom: ["FW"], rs485: ["FW"], modbus: ["FW"], ct: ["RF"], broker: ["MQTT"], phone: ["BLE"], house: ["EVT"] };
+  flash: ["FW"], clampA: ["P1", "SPI", "UDP"], clampB: ["P1", "SPI", "UDP"], clampC: ["P1", "SPI", "UDP"], bat1: ["UDP"], bat2: ["UDP"], bat3: ["UDP"], micro: ["CAN"], bms: ["CAN", "ALARM"], afe: ["CAN"], pack: ["CAN", "ALARM"], fets: ["CAN", "ALARM"], eeprom: ["FW"], rs485: ["FW"], modbus: ["FW"], ct: ["RF"], broker: ["MQTT"], phone: ["BLE"], house: ["EVT"] };
 const CHMAP = { mcu: null, fc41d: ["USART1", "MQTT", "RF", "BLE"], afe: ["I2C2", "ALARM"], pack: ["I2C2", "UART5", "ALARM"], fets: ["I2C2", "ALARM"], extp: ["UART5"], ct: ["RF"], broker: ["MQTT"], phone: ["BLE"], inv: ["FW", "EVT"], house: ["EVT"], out1: ["FW"], out2: ["FW"], pv1: ["FW", "EVT"], pv2: ["FW", "EVT"], panel1: ["EVT"], panel2: ["EVT"] };
 const BS1 = ["OV", "UV", "OCD1", "OCD2", "OCC", "SC", "PF", "WDT"], BS2 = ["UTC", "OTC", "UTD", "OTD"];
 function kv(rows) { return `<dl class="kv">${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>`; }
@@ -1119,7 +1128,7 @@ svg.addEventListener("keydown", (e) => {
 /* ------------------------------------------------------------ console */
 const LOG = []; const LOGMAX = 600;
 let CHANNELS = ["FW", "I2C2", "USART1", "UART5", "MQTT", "RF", "BLE", "EVT", "ALARM"];
-const shown = new Set(["FW", "I2C2", "USART1", "UART5", "UART6", "LPUART1", "CAN", "UDP", "MQTT", "RF", "BLE", "EVT", "ALARM"]);
+const shown = new Set(["FW", "I2C2", "USART1", "UART5", "UART6", "LPUART1", "CAN", "P1", "SPI", "UDP", "MQTT", "RF", "BLE", "EVT", "ALARM"]);
 let logDirty = true;
 function log(ch, dir, text, t) {
   LOG.push({ t: t ?? S.t, ch, dir, text });
@@ -1515,6 +1524,10 @@ $("startBtn").addEventListener("click", async () => {
     await post("api/start", { image: chosen, bms: ch && (ch.needs_bms || ch.bms_optional) ? $("bmsSel").value || undefined : undefined,
       pv: [+$("oPvA").value, +$("oPvB").value], load: +$("oLoadS").value, soc: +$("oSoc").value,
       packs: ch && ch.packs ? +$("oPacks").value : undefined, batteries: ch && ch.model === "CT002 / CT003" ? +$("oBats2").value : undefined });
+    // don't wait for the stream to tell: a proxy (Home Assistant's ingress, a phone that
+    // paused the page) can hold it up, and the start screen would look as if nothing happened
+    onState(await (await fetch("api/state")).json());
+    reconnectIfQuiet(0);
   } catch (e) { $("startErr").textContent = e.message; }
   $("startBtn").disabled = !chosen; $("startBtn").textContent = "Start";
 });
@@ -1527,17 +1540,19 @@ function onState(st) {
   if (!MODEL) buildLayout("B2500");
   if (st.running) {
     showStart(false);
-    if (st.snapshot) { fromSnap(st.snapshot); syncSliders(); }
+    if (st.snapshot && st.snapshot.model) { fromSnap(st.snapshot); syncSliders(); }
   } else {
     SN = null; showStart(true);
     for (const [id, txt] of [["chipWifi", "Wi‑Fi"], ["chipMqtt", "MQTT"], ["chipCt", "CT002"], ["chipBle", "BLE"]]) {
       const c = $(id); c.classList.add("off"); c.classList.remove("bad"); c.lastChild.nodeValue = txt;
     }
-    $("crumb").textContent = "no device running"; $("devState").textContent = "ready";
+    $("crumb").textContent = "no device running";
   }
   LOG.length = 0; hist.length = 0; logDirty = true; fresh = true;
 }
 function onTick(r) {
+  if (!r.snapshot || !r.snapshot.model) return;
+  if (!SN) { showStart(false); }          // a device runs: the stream says so even if its hello got lost
   fromSnap(r.snapshot);
   for (const ev of r.events) {
     log(ev.ch, ev.dir, ev.text, ev.t);
@@ -1546,28 +1561,41 @@ function onTick(r) {
   for (const h of r.history) { hist.push(h); if (hist.length > HMAX) hist.shift(); }
   fresh = false;
 }
-let es = null;
+let es = null, lastMsg = performance.now();
 function connect() {
+  if (es) es.close();
+  lastMsg = performance.now();
   es = new EventSource("api/stream");
   const link = (ok, txt) => { const c = $("chipLink"); c.classList.toggle("bad", !ok); c.lastChild.nodeValue = txt; };
+  const seen = (fn) => (e) => { lastMsg = performance.now(); try { fn(JSON.parse(e.data)); } catch (err) { console.error(err); } };
   es.onopen = () => link(true, "live");
   es.onerror = () => link(false, "reconnecting");
-  es.addEventListener("hello", (e) => onState(JSON.parse(e.data)));
-  es.addEventListener("idle", (e) => { images = JSON.parse(e.data).images || []; if (!SN) renderImages(); });
-  es.addEventListener("tick", (e) => onTick(JSON.parse(e.data)));
+  es.addEventListener("hello", seen(onState));
+  es.addEventListener("idle", seen((d) => { images = d.images || []; if (!SN) renderImages(); }));
+  es.addEventListener("tick", seen(onTick));
 }
+// the server sends something at least every 3 s: a stream quiet for longer is stuck behind a
+// proxy or was paused with the page, so open a new one (it starts with the current state)
+function reconnectIfQuiet(ms) { if (performance.now() - lastMsg > ms) connect(); }
+setInterval(() => reconnectIfQuiet(6000), 2000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) reconnectIfQuiet(3000); });
 
 /* --------------------------------------------------------------- loop */
 let last = performance.now(), slowT = 0;
+let frameErr = 0;
 function frame(now) {
-  const dt = clamp((now - last) / 1000, 0, 0.1); last = now;
-  animFlows(dt);
-  animCaps(now);
-  if (SN) render();
-  if (!reduced && SN) $("beam").setAttribute("x", (170 + ((now / 7000) % 1) * 820).toFixed(1));
-  if (now - slowT > 250) { slowT = now; renderHud(); syncSliders(); inspector(); renderLog(); drawCharts(); }
-  else if (hoverX != null) drawCharts();
-  requestAnimationFrame(frame);
+  requestAnimationFrame(frame);          // first: one bad frame must not stop the page
+  try {
+    const dt = clamp((now - last) / 1000, 0, 0.1); last = now;
+    animFlows(dt);
+    animCaps(now);
+    if (SN) render();
+    if (!reduced && SN) $("beam").setAttribute("x", (170 + ((now / 7000) % 1) * 820).toFixed(1));
+    if (now - slowT > 250) { slowT = now; renderHud(); syncSliders(); inspector(); renderLog(); drawCharts(); }
+    else if (hoverX != null) drawCharts();
+  } catch (e) {
+    if (now - frameErr > 5000) { frameErr = now; console.error(e); }
+  }
 }
 placeLens(); setDepth(1); connect();
 requestAnimationFrame(frame);

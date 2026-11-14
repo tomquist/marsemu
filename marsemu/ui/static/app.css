@@ -210,7 +210,7 @@ table.regs td:first-child{color:var(--xray)}
 .ln .c{font-weight:600}
 .ln .x{overflow:hidden;text-overflow:ellipsis;color:var(--fg-dim)}
 .ln:hover .x{color:var(--fg)}
-.ch-I2C2{color:var(--i2c)} .ch-USART1{color:var(--uart)} .ch-UART6{color:var(--uart)} .ch-LPUART1{color:var(--uart)} .ch-CAN{color:var(--ext)} .ch-UDP{color:var(--rf)} .ch-RF{color:var(--rf)} .ch-MQTT{color:var(--rf)} .ch-UART5{color:var(--ext)} .ch-FW{color:var(--xray)} .ch-BLE{color:var(--rf)} .ch-EVT{color:var(--warn)} .ch-ALARM{color:var(--alarm)}
+.ch-I2C2{color:var(--i2c)} .ch-USART1{color:var(--uart)} .ch-UART6{color:var(--uart)} .ch-LPUART1{color:var(--uart)} .ch-CAN{color:var(--ext)} .ch-UDP{color:var(--rf)} .ch-P1{color:var(--uart)} .ch-SPI{color:var(--i2c)} .ch-RF{color:var(--rf)} .ch-MQTT{color:var(--rf)} .ch-UART5{color:var(--ext)} .ch-FW{color:var(--xray)} .ch-BLE{color:var(--rf)} .ch-EVT{color:var(--warn)} .ch-ALARM{color:var(--alarm)}
 
 @media (max-width:1180px){
   html,body{height:auto}
