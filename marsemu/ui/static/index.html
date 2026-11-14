@@ -15,7 +15,9 @@
     <div class="run">
       <button class="btn icon" id="playBtn" aria-label="Pause">❚❚</button>
       <button class="btn icon" id="stepBtn" aria-label="Step one second" title="Step 1 s">⇥</button>
-      <div class="seg" style="grid-template-columns:repeat(4,auto)" role="group" aria-label="Speed limit">
+      <div class="seg" style="grid-template-columns:repeat(6,auto)" role="group" aria-label="Speed limit">
+        <button data-speed="0.1" aria-pressed="false" style="padding:6px 7px" title="a tenth of real time">0.1×</button>
+        <button data-speed="0.25" aria-pressed="false" style="padding:6px 7px" title="a quarter of real time">¼×</button>
         <button data-speed="1" aria-pressed="true" style="padding:6px 8px" title="no faster than real time">1×</button>
         <button data-speed="5" aria-pressed="false" style="padding:6px 8px">5×</button>
         <button data-speed="20" aria-pressed="false" style="padding:6px 8px">20×</button>
@@ -61,9 +63,11 @@
       <h3 id="houseHead">House and sun</h3>
       <div class="sl only-ct"><label for="sBats">Batteries polling the meter</label><output id="oBats">2</output><input type="range" id="sBats" min="0" max="3" step="1" value="2"></div>
       <div class="sl only-ct"><label for="sBatW">Power each battery reports</label><output id="oBatW">300 W</output><input type="range" id="sBatW" min="-2500" max="2500" step="50" value="300"></div>
-      <div class="sl only-house"><label for="sLoad">House load</label><output id="oLoad">400 W</output><input type="range" id="sLoad" min="0" max="2000" step="10" value="400"></div>
+      <div class="sl only-house"><label for="sLoad">House load</label><output id="oLoad">400 W</output><input type="range" id="sLoad" min="-2000" max="3000" step="10" value="400"></div>
       <div class="sl only-pv"><label for="sPv1">PV 1 available</label><output id="oPv1">300 W</output><input type="range" id="sPv1" min="0" max="500" step="5" value="300"></div>
       <div class="sl only-pv"><label for="sPv2">PV 2 available</label><output id="oPv2">300 W</output><input type="range" id="sPv2" min="0" max="500" step="5" value="300"></div>
+      <div class="sl only-pv4"><label for="sPv3">PV 3 available</label><output id="oPv3">300 W</output><input type="range" id="sPv3" min="0" max="500" step="5" value="300"></div>
+      <div class="sl only-pv4"><label for="sPv4">PV 4 available</label><output id="oPv4">300 W</output><input type="range" id="sPv4" min="0" max="500" step="5" value="300"></div>
       <div class="sl only-house"><label for="sAmb">Ambient</label><output id="oAmb">22 °C</output><input type="range" id="sAmb" min="-10" max="45" step="1" value="22"></div>
     </div>
     <div class="sect">
@@ -174,7 +178,9 @@
           <div class="opts">
             <label>PV 1, W<input type="number" id="oPvA" value="300" min="0" max="500"></label>
             <label>PV 2, W<input type="number" id="oPvB" value="300" min="0" max="500"></label>
-            <label>House load, W<input type="number" id="oLoadS" value="400" min="0" max="3000"></label>
+            <label>PV 3, W<input type="number" id="oPvC" value="300" min="0" max="500"></label>
+            <label>PV 4, W<input type="number" id="oPvD" value="300" min="0" max="500"></label>
+            <label>House load, W<input type="number" id="oLoadS" value="400" min="-3000" max="3000" title="negative: the house exports, e.g. from a separate solar system"></label>
             <label>Charge, %<input type="number" id="oSoc" value="50" min="1" max="100"></label>
             <label id="lPacks" hidden>Packs<input type="number" id="oPacks" value="1" min="1" max="9"></label>
             <label id="lBats" hidden>Batteries polling<input type="number" id="oBats2" value="2" min="0" max="3"></label>

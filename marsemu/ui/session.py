@@ -270,7 +270,8 @@ class DeviceSession:
         if self._apply_device(c):
             return
         if op == "load":
-            self.house.loads["A"] = max(0.0, float(c["w"]))
+            # negative: the house exports on its own (a separate solar system feeding it)
+            self.house.loads["A"] = float(c["w"])
         elif op == "ambient":
             self.ambient_c = float(c["c"])
             self.pack.ambient_c = self.ambient_c
@@ -295,6 +296,7 @@ class DeviceSession:
             self._step_s += max(0.05, min(60.0, float(c.get("s", 1.0))))
         elif op == "speed":
             self.speed = max(0.0, float(c["x"]))
+            self._repace = True
         elif op == "mqtt":
             if not self.sub_topic:
                 raise ValueError("the device has not subscribed to its command topic yet")
@@ -352,6 +354,7 @@ class DeviceSession:
 
     def _loop(self) -> None:
         wall0, virt0 = time.monotonic(), self.dev.time
+        rate_w, rate_t = wall0, virt0
         last_snap = 0.0
         try:
             while not self._stop.is_set():
@@ -363,25 +366,40 @@ class DeviceSession:
                         self._apply(c)
                     except (KeyError, TypeError, ValueError) as exc:
                         self._log("EVT", "", f"command {c.get('op')!r} failed: {exc}")
+                if getattr(self, "_repace", False):              # a new speed: pace from here
+                    self._repace = False
+                    wall0, virt0 = time.monotonic(), self.dev.time
                 if self.paused and self._step_s <= 0:
                     wall0, virt0 = time.monotonic(), self.dev.time
+                    rate_w, rate_t = wall0, virt0
                     self._take_snapshot()
                     time.sleep(0.05)
                     continue
-                dt = min(self.SLICE_S, self._step_s) if self.paused else self.SLICE_S
+                if self.speed > 0 and not self.paused:
+                    ahead = (self.dev.time - virt0) / self.speed - (time.monotonic() - wall0)
+                    if ahead > 0.002:
+                        # ahead of the clock: wait in short steps, so commands and snapshots
+                        # keep coming (at 0.1x a slice is ten times longer in wall time)
+                        time.sleep(min(ahead, 0.05))
+                        if time.monotonic() - last_snap > 0.1:
+                            self._take_snapshot()
+                            last_snap = time.monotonic()
+                        continue
+                    if ahead < -2.0:                         # fell behind: don't race to catch up
+                        wall0, virt0 = time.monotonic(), self.dev.time
+                # slower than real time: shorter slices, so the picture moves smoothly
+                slice_s = self.SLICE_S if not (0 < self.speed < 1) else max(0.01, self.SLICE_S * self.speed)
+                dt = min(slice_s, self._step_s) if self.paused else slice_s
                 w0 = time.monotonic()
                 self.dev.run(dt)
                 w1 = time.monotonic()
                 if self.paused:
                     self._step_s -= dt
-                rate = dt / max(1e-6, w1 - w0)
-                self._wall_rate = rate if not self._wall_rate else 0.85 * self._wall_rate + 0.15 * rate
-                if self.speed > 0 and not self.paused:
-                    ahead = (self.dev.time - virt0) / self.speed - (time.monotonic() - wall0)
-                    if ahead > 0:
-                        time.sleep(min(ahead, 0.5))
-                    elif ahead < -2.0:                       # fell behind: don't race to catch up
-                        wall0, virt0 = time.monotonic(), self.dev.time
+                # the pace you see (emulated per wall second, waits included), over the last second
+                if w1 - rate_w >= 1.0:
+                    rate = (self.dev.time - rate_t) / (w1 - rate_w)
+                    self._wall_rate = rate if not self._wall_rate else 0.5 * self._wall_rate + 0.5 * rate
+                    rate_w, rate_t = w1, self.dev.time
                 if w1 - last_snap > 0.1:
                     self._take_snapshot()
                     last_snap = w1
@@ -1078,7 +1096,7 @@ class CtSession(DeviceSession):
                 b["w"] = float(c["w"])
             return True
         if op == "load":
-            self.house_load = max(0.0, float(c["w"]))
+            self.house_load = float(c["w"])                    # negative: the house exports
             return True
         if op in ("pv", "ambient", "scenario"):
             return True                                         # nothing to drive on a meter

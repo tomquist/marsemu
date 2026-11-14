@@ -89,7 +89,7 @@ def follow_load(app: UiApp, entity: str, period: float = 5.0) -> None:
             except (TypeError, ValueError):
                 w = None
             if w is not None and w != last:
-                sess.command({"op": "load", "w": max(0.0, w)})
+                sess.command({"op": "load", "w": w})          # negative: the house exports
                 last = w
         time.sleep(period)
 

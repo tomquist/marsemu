@@ -17,13 +17,17 @@ data from the running firmware:
   meter, through the Wi‑Fi module and the firmware's decision, to the outputs,
   the microinverter, the house and the pack (key `T`, arrows to step, `Esc`).
 - **Telemetry and console.** Charts of the last five minutes and every bus
-  message (AT commands, MQTT, CT polls, the extension bus, the front end),
-  with filters.
-- **Controls.** House load, sun on each PV input, ambient temperature,
+  message (AT commands, MQTT, CT polls, the extension bus, the front end, the
+  CT003's P1 telegrams), with filters; the console can wrap long lines and
+  expand. On a wide screen the separators between the panels can be dragged
+  (double-click one to reset it); the sizes are kept in the browser.
+- **Controls.** House load (negative for a house that exports on its own,
+  e.g. from a separate solar system), sun on each PV input (two on the
+  B2500, four on the Venus D, Venus A and Jupiter), ambient temperature,
   scenarios (load step; on the B2500 a passing cloud and solar surplus, on the
   Venus a house that exports), faults (Wi‑Fi down,
   CT002 offline, pack over-temperature), a status poll (`cd=1`), pause, step
-  and a speed limit.
+  and a speed limit from 0.1× to as fast as the computer can.
 
 Every device marsemu models. Pick the image on the start screen; devices
 with a BMS image of their own take it too.

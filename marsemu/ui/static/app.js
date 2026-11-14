@@ -1153,9 +1153,80 @@ logEl.addEventListener("scroll", () => { stick = logEl.scrollTop + logEl.clientH
 // wrap long lines and a bigger console, remembered in this browser
 const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) === "1"; localStorage.setItem(k, v ? "1" : "0"); } catch (e) { /* no storage */ } return false; };
 function setWrap(on) { logEl.classList.toggle("wrap", on); $("logWrap").setAttribute("aria-pressed", on); pref("marsemu.wrap", on); if (stick) logEl.scrollTop = logEl.scrollHeight; }
-function setBig(on) { document.body.classList.toggle("big-console", on); $("logBig").setAttribute("aria-pressed", on); $("logBig").textContent = on ? "shrink" : "expand"; pref("marsemu.big", on); drawCharts(); if (stick) logEl.scrollTop = logEl.scrollHeight; }
+function setBig(on) {
+  // wide screens: the bottom row's height (a separator can set it too); narrow ones: the console's
+  if (on && lay["--bottom-h"] !== "48vh") { lay.prevBottom = lay["--bottom-h"]; lay["--bottom-h"] = "48vh"; }
+  if (!on && lay["--bottom-h"] === "48vh") { lay["--bottom-h"] = lay.prevBottom || ""; }
+  applyLayout(); saveLayout(); bigState();
+  drawCharts(); if (stick) logEl.scrollTop = logEl.scrollHeight;
+}
+function bigState() {
+  const on = lay["--bottom-h"] === "48vh";
+  document.body.classList.toggle("big-console", on);
+  $("logBig").setAttribute("aria-pressed", on); $("logBig").textContent = on ? "shrink" : "expand";
+}
 $("logWrap").addEventListener("click", () => setWrap(!logEl.classList.contains("wrap")));
-$("logBig").addEventListener("click", () => setBig(!document.body.classList.contains("big-console")));
+$("logBig").addEventListener("click", () => setBig(lay["--bottom-h"] !== "48vh"));
+
+/* ------------------------------------------------------------- resizable panels */
+// wide layout only (the grid in app.css reads these variables); remembered in this browser
+const appEl = $("app");
+const LAY_KEYS = ["--rail-w", "--insp-w", "--bottom-h", "--fa", "--fb"];
+let lay = {};
+try { lay = JSON.parse(localStorage.getItem("marsemu.layout") || "{}") || {}; } catch (e) { lay = {}; }
+function applyLayout() {
+  for (const k of LAY_KEYS) { if (lay[k]) appEl.style.setProperty(k, lay[k]); else appEl.style.removeProperty(k); }
+  requestAnimationFrame(placeGutters);
+}
+function saveLayout() { try { localStorage.setItem("marsemu.layout", JSON.stringify(lay)); } catch (e) { /* no storage */ } }
+function box(sel) {
+  const a = appEl.getBoundingClientRect(), r = document.querySelector(sel).getBoundingClientRect();
+  return { l: r.left - a.left, t: r.top - a.top, r: r.right - a.left, b: r.bottom - a.top, w: r.width, h: r.height };
+}
+const GUT = {};
+const GUTTERS = {
+  // key: [orientation, which variables a double-click resets, how a drag sets them]
+  rail: ["v", ["--rail-w"], (x) => { lay["--rail-w"] = clamp(Math.round(x - box(".rail").l - 5), 160, 420) + "px"; }],
+  insp: ["v", ["--insp-w"], (x) => { lay["--insp-w"] = clamp(Math.round(box(".insp").r - x - 5), 260, 680) + "px"; }],
+  split: ["v", ["--fa", "--fb"], (x) => {
+    const st = box(".stage"), total = st.w - 10, left = clamp(x - st.l - 5, 180, total - 180);
+    lay["--fa"] = left.toFixed(0) + "fr"; lay["--fb"] = (total - left).toFixed(0) + "fr";
+  }],
+  bottom: ["h", ["--bottom-h"], (x, y) => {
+    lay["--bottom-h"] = clamp(Math.round(box(".tele").b - y - 5), 120, Math.round(appEl.clientHeight * 0.75)) + "px";
+  }],
+};
+function placeGutters() {
+  if (innerWidth <= 1180) return;
+  const rail = box(".rail"), stage = box(".stage"), insp = box(".insp"), tele = box(".tele"), cons = box(".cons");
+  const put = (k, x, y, w, h) => Object.assign(GUT[k].style, { left: x + "px", top: y + "px", width: Math.max(6, w) + "px", height: Math.max(6, h) + "px" });
+  put("rail", rail.r, rail.t, stage.l - rail.r, rail.h);
+  put("insp", stage.r, stage.t, insp.l - stage.r, stage.h);
+  put("split", tele.r, tele.t, cons.l - tele.r, tele.h);
+  put("bottom", tele.l, stage.b, cons.r - tele.l, tele.t - stage.b);
+}
+for (const [k, [o, keys, set]] of Object.entries(GUTTERS)) {
+  const g = document.createElement("div");
+  g.className = "gutter " + o; g.setAttribute("role", "separator");
+  g.setAttribute("aria-orientation", o === "v" ? "vertical" : "horizontal");
+  g.title = "Drag to resize · double-click to reset";
+  appEl.appendChild(g); GUT[k] = g;
+  g.addEventListener("pointerdown", (e) => {
+    e.preventDefault(); g.setPointerCapture(e.pointerId); g.classList.add("drag");
+    document.body.classList.add("resizing"); document.body.classList.toggle("rows", o === "h");
+    const a = appEl.getBoundingClientRect();
+    const move = (ev) => { set(ev.clientX - a.left, ev.clientY - a.top); applyLayout(); bigState(); drawCharts(); };
+    const up = () => {
+      g.classList.remove("drag"); document.body.classList.remove("resizing", "rows");
+      g.removeEventListener("pointermove", move); g.removeEventListener("pointerup", up); g.removeEventListener("pointercancel", up);
+      saveLayout();
+    };
+    g.addEventListener("pointermove", move); g.addEventListener("pointerup", up); g.addEventListener("pointercancel", up);
+  });
+  g.addEventListener("dblclick", () => { for (const v of keys) delete lay[v]; applyLayout(); saveLayout(); bigState(); drawCharts(); });
+}
+if (window.ResizeObserver) new ResizeObserver(() => placeGutters()).observe(appEl);
+window.addEventListener("resize", placeGutters);
 function renderLog() {
   if (!logDirty) return;
   logDirty = false;
@@ -1316,14 +1387,14 @@ function bind(id, out, fmt, send) {
   i.addEventListener("input", () => { $(out).textContent = fmt(+i.value); debounced(id, () => send(+i.value)); });
 }
 bind("sLoad", "oLoad", (v) => v + " W", (v) => control({ op: "load", w: v }));
-const sendPv = () => {
-  const rest = SN && SN.mppt ? SN.mppt.avail.slice(2) : [];
-  control({ op: "pv", w: [+$("sPv1").value, +$("sPv2").value, ...rest] });
-};
+const pvCount = () => (SN && SN.mppt ? SN.mppt.avail.length : SN && SN.pv ? SN.pv.length : 2);
+const sendPv = () => control({ op: "pv", w: ["sPv1", "sPv2", "sPv3", "sPv4"].slice(0, pvCount()).map((id) => +$(id).value) });
 bind("sBats", "oBats", (v) => String(v), (v) => control({ op: "batteries", n: v }));
 bind("sBatW", "oBatW", (v) => v + " W", (v) => control({ op: "battery_w", w: v }));
 bind("sPv1", "oPv1", (v) => v + " W", sendPv);
 bind("sPv2", "oPv2", (v) => v + " W", sendPv);
+bind("sPv3", "oPv3", (v) => v + " W", sendPv);
+bind("sPv4", "oPv4", (v) => v + " W", sendPv);
 bind("sAmb", "oAmb", (v) => v + " °C", (v) => control({ op: "ambient", c: v }));
 function syncSliders() {
   if (!SN) return;
@@ -1333,6 +1404,7 @@ function syncSliders() {
   if (avail) {
     put("sPv1", "oPv1", Math.round(avail[0]), (v) => v + " W");
     put("sPv2", "oPv2", Math.round(avail[1]), (v) => v + " W");
+    if (avail.length > 2) { put("sPv3", "oPv3", Math.round(avail[2]), (v) => v + " W"); put("sPv4", "oPv4", Math.round(avail[3]), (v) => v + " W"); }
   }
   if (SN.batteries) {
     put("sBats", "oBats", SN.batteries.length, (v) => String(v));
@@ -1451,6 +1523,10 @@ function buildLayout(model, channels) {
   $("shellName").textContent = SHELL[model][0]; $("shellSub").textContent = SHELL[model][1];
   const pv = model === "B2500" || !!(SN && SN.mppt), ct = model === "CT002 / CT003";
   document.querySelectorAll(".only-pv").forEach((e) => { e.hidden = !pv; });
+  // four PV inputs (Venus D/A, Jupiter): two more sliders, and each input takes up to 800 W there
+  const pv4 = !!(SN && SN.mppt && SN.mppt.avail.length >= 4);
+  document.querySelectorAll(".only-pv4").forEach((e) => { e.hidden = !pv4; });
+  for (const id of ["sPv1", "sPv2", "sPv3", "sPv4"]) $(id).max = pv4 ? 800 : 500;
   document.querySelectorAll(".only-nopv").forEach((e) => { e.hidden = pv || ct; });
   document.querySelectorAll(".only-ct").forEach((e) => { e.hidden = !ct; });
   document.querySelectorAll(".only-house").forEach((e) => { e.hidden = ct; });
@@ -1499,7 +1575,9 @@ function renderImages() {
     if (bmss.some((b) => b.name === cur)) $("bmsSel").value = cur;
   }
   const pvIn = !ch || ch.pv_inputs > 0, ct = !!(ch && ch.model === "CT002 / CT003");
+  const pv4 = !!(ch && ch.pv_inputs >= 4);
   $("oPvA").parentElement.hidden = !pvIn; $("oPvB").parentElement.hidden = !pvIn;
+  $("oPvC").parentElement.hidden = !pv4; $("oPvD").parentElement.hidden = !pv4;
   $("oLoadS").parentElement.hidden = ct; $("oSoc").parentElement.hidden = ct;
   $("lPacks").hidden = !(ch && ch.packs); $("lBats").hidden = !ct;
   $("startBtn").disabled = !chosen || (needBms && !bmss.length);
@@ -1528,7 +1606,7 @@ $("startBtn").addEventListener("click", async () => {
   try {
     const ch = images.find((i) => i.name === chosen);
     await post("api/start", { image: chosen, bms: ch && (ch.needs_bms || ch.bms_optional) ? $("bmsSel").value || undefined : undefined,
-      pv: [+$("oPvA").value, +$("oPvB").value], load: +$("oLoadS").value, soc: +$("oSoc").value,
+      pv: [+$("oPvA").value, +$("oPvB").value, ...(ch && ch.pv_inputs >= 4 ? [+$("oPvC").value, +$("oPvD").value] : [])], load: +$("oLoadS").value, soc: +$("oSoc").value,
       packs: ch && ch.packs ? +$("oPacks").value : undefined, batteries: ch && ch.model === "CT002 / CT003" ? +$("oBats2").value : undefined });
     // don't wait for the stream to tell: a proxy (Home Assistant's ingress, a phone that
     // paused the page) can hold it up, and the start screen would look as if nothing happened
@@ -1603,7 +1681,7 @@ function frame(now) {
     if (now - frameErr > 5000) { frameErr = now; console.error(e); }
   }
 }
-placeLens(); setDepth(1); setWrap(pref("marsemu.wrap")); setBig(pref("marsemu.big")); connect();
+placeLens(); setDepth(1); setWrap(pref("marsemu.wrap")); applyLayout(); bigState(); connect();
 requestAnimationFrame(frame);
 window.addEventListener("resize", () => drawCharts());
 })();
