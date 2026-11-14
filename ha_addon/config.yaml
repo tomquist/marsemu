@@ -1,5 +1,5 @@
 name: marsemu
-version: "0.2.2"
+version: "0.2.3"
 slug: marsemu
 description: An emulated Marstek battery running its own firmware, with an X-ray dashboard
 url: https://github.com/tomquist/marsemu

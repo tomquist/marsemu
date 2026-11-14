@@ -1150,11 +1150,17 @@ buildFilters(CHANNELS);
 const logEl = $("log");
 let stick = true;
 logEl.addEventListener("scroll", () => { stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8; });
+// wrap long lines and a bigger console, remembered in this browser
+const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) === "1"; localStorage.setItem(k, v ? "1" : "0"); } catch (e) { /* no storage */ } return false; };
+function setWrap(on) { logEl.classList.toggle("wrap", on); $("logWrap").setAttribute("aria-pressed", on); pref("marsemu.wrap", on); if (stick) logEl.scrollTop = logEl.scrollHeight; }
+function setBig(on) { document.body.classList.toggle("big-console", on); $("logBig").setAttribute("aria-pressed", on); $("logBig").textContent = on ? "shrink" : "expand"; pref("marsemu.big", on); drawCharts(); if (stick) logEl.scrollTop = logEl.scrollHeight; }
+$("logWrap").addEventListener("click", () => setWrap(!logEl.classList.contains("wrap")));
+$("logBig").addEventListener("click", () => setBig(!document.body.classList.contains("big-console")));
 function renderLog() {
   if (!logDirty) return;
   logDirty = false;
   const rows = LOG.filter((l) => shown.has(l.ch)).slice(-200);
-  logEl.innerHTML = rows.map((l) => `<div class="ln" title="${esc(l.dir)}"><span class="t">${l.t.toFixed(1).padStart(7)}</span><span class="c ch-${l.ch}">${l.ch}</span><span class="x">${l.dir ? `<span style="color:var(--fg-faint)">${esc(l.dir)}</span>  ` : ""}${esc(l.text)}</span></div>`).join("");
+  logEl.innerHTML = rows.map((l) => `<div class="ln" title="${esc((l.dir ? l.dir + "  " : "") + l.text)}"><span class="t">${l.t.toFixed(1).padStart(7)}</span><span class="c ch-${l.ch}">${l.ch}</span><span class="x">${l.dir ? `<span style="color:var(--fg-faint)">${esc(l.dir)}</span>  ` : ""}${esc(l.text)}</span></div>`).join("");
   if (stick) logEl.scrollTop = logEl.scrollHeight;
 }
 
@@ -1597,7 +1603,7 @@ function frame(now) {
     if (now - frameErr > 5000) { frameErr = now; console.error(e); }
   }
 }
-placeLens(); setDepth(1); connect();
+placeLens(); setDepth(1); setWrap(pref("marsemu.wrap")); setBig(pref("marsemu.big")); connect();
 requestAnimationFrame(frame);
 window.addEventListener("resize", () => drawCharts());
 })();

@@ -18,9 +18,11 @@ body{background:var(--bg);color:var(--fg);font:400 13px/1.45 var(--f-label);-web
 button,input,select{font:inherit;color:inherit}
 .app{
   height:100%;display:grid;gap:10px;
-  grid-template-columns:220px minmax(0,1fr) 348px;
-  grid-template-rows:auto minmax(0,1fr) 214px;
-  grid-template-areas:"top top top" "rail stage insp" "tele tele cons";
+  /* the stage spans two columns so the bottom row can split evenly: charts on the left,
+     the bus console (about half the width) on the right */
+  grid-template-columns:220px minmax(0,1fr) minmax(0,1fr) 348px;
+  grid-template-rows:auto minmax(0,1fr) 250px;
+  grid-template-areas:"top top top top" "rail stage stage insp" "tele tele cons cons";
   padding-block:10px;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
   background:
@@ -210,6 +212,13 @@ table.regs td:first-child{color:var(--xray)}
 .ln .c{font-weight:600}
 .ln .x{overflow:hidden;text-overflow:ellipsis;color:var(--fg-dim)}
 .ln:hover .x{color:var(--fg)}
+#log.wrap .ln{white-space:normal}
+#log.wrap .ln .x{white-space:pre-wrap;word-break:break-word;overflow:visible}
+.ph .tog-btn{background:transparent;border:1px solid var(--line-2);border-radius:2px;padding:1px 7px;cursor:pointer;font:600 9.5px var(--f-mono);color:var(--fg-faint);margin-left:6px}
+.ph .tog-btn[aria-pressed="true"]{color:var(--fg);border-color:var(--fg-faint)}
+/* a big console: the bottom row takes about half the screen */
+@media (min-width:1181px){ body.big-console .app{grid-template-rows:auto minmax(0,1fr) 48vh} }
+@media (max-width:1180px){ body.big-console .cons{height:70vh} }
 .ch-I2C2{color:var(--i2c)} .ch-USART1{color:var(--uart)} .ch-UART6{color:var(--uart)} .ch-LPUART1{color:var(--uart)} .ch-CAN{color:var(--ext)} .ch-UDP{color:var(--rf)} .ch-P1{color:var(--uart)} .ch-SPI{color:var(--i2c)} .ch-RF{color:var(--rf)} .ch-MQTT{color:var(--rf)} .ch-UART5{color:var(--ext)} .ch-FW{color:var(--xray)} .ch-BLE{color:var(--rf)} .ch-EVT{color:var(--warn)} .ch-ALARM{color:var(--alarm)}
 
 @media (max-width:1180px){
