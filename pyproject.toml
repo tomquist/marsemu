@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marsemu"
+version = "0.1.0"
+description = "Run Marstek/Hame energy storage firmware (B2500, Venus, Jupiter, CT00x) without the hardware: CPU emulator, FC41D module and whole-device models"
+readme = "README.md"
+license = { text = "GPL-2.0-or-later" }
+authors = [{ name = "tomquist" }]
+requires-python = ">=3.10"
+dependencies = ["unicorn>=2.0.1,<2.2", "capstone>=5"]
+keywords = ["marstek", "hame", "b2500", "venus", "emulator", "firmware", "unicorn"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Embedded Systems",
+    "Topic :: System :: Emulators",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+serial = ["pyserial"]
+
+[project.urls]
+Homepage = "https://github.com/tomquist/marsemu"
+Issues = "https://github.com/tomquist/marsemu/issues"
+
+[project.scripts]
+marsemu = "marsemu.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["marsemu*"]
+
+[tool.setuptools.package-data]
+marsemu = ["data/*.json"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not firmware'"
+markers = ["firmware: boots real firmware images (slow)"]
+testpaths = ["tests"]

@@ -1,0 +1,10 @@
+.git
+**/__pycache__
+**/*.pyc
+.pytest_cache
+emu-state
+docs
+tests
+tools
+firmware
+*.bin

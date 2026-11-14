@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+emu-state/
+/firmware
+*.bin
+*.egg-info/
+build/

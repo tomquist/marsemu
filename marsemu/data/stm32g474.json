@@ -1,0 +1,2273 @@
+{
+"device": "STM32G474xx",
+"peripherals": {
+"ADC1": {
+"base": 1342177280,
+"irqs": {
+"ADC1_2": 18
+},
+"regs": {
+"0": "ISR",
+"100": "OFR2",
+"104": "OFR3",
+"108": "OFR4",
+"12": "CFGR",
+"128": "JDR1",
+"132": "JDR2",
+"136": "JDR3",
+"140": "JDR4",
+"16": "CFGR2",
+"160": "AWD2CR",
+"164": "AWD3CR",
+"176": "DIFSEL",
+"180": "CALFACT",
+"192": "GCOMP",
+"20": "SMPR1",
+"24": "SMPR2",
+"32": "TR1",
+"36": "TR2",
+"4": "IER",
+"40": "TR3",
+"48": "SQR1",
+"52": "SQR2",
+"56": "SQR3",
+"60": "SQR4",
+"64": "DR",
+"76": "JSQR",
+"8": "CR",
+"96": "OFR1"
+}
+},
+"ADC12_Common": {
+"base": 1342178048,
+"irqs": {},
+"regs": {
+"0": "CSR",
+"12": "CDR",
+"8": "CCR"
+}
+},
+"ADC2": {
+"base": 1342177536,
+"irqs": {},
+"regs": {
+"0": "ISR",
+"100": "OFR2",
+"104": "OFR3",
+"108": "OFR4",
+"12": "CFGR",
+"128": "JDR1",
+"132": "JDR2",
+"136": "JDR3",
+"140": "JDR4",
+"16": "CFGR2",
+"160": "AWD2CR",
+"164": "AWD3CR",
+"176": "DIFSEL",
+"180": "CALFACT",
+"192": "GCOMP",
+"20": "SMPR1",
+"24": "SMPR2",
+"32": "TR1",
+"36": "TR2",
+"4": "IER",
+"40": "TR3",
+"48": "SQR1",
+"52": "SQR2",
+"56": "SQR3",
+"60": "SQR4",
+"64": "DR",
+"76": "JSQR",
+"8": "CR",
+"96": "OFR1"
+}
+},
+"ADC3": {
+"base": 1342178304,
+"irqs": {
+"ADC3": 47
+},
+"regs": {
+"0": "ISR",
+"100": "OFR2",
+"104": "OFR3",
+"108": "OFR4",
+"12": "CFGR",
+"128": "JDR1",
+"132": "JDR2",
+"136": "JDR3",
+"140": "JDR4",
+"16": "CFGR2",
+"160": "AWD2CR",
+"164": "AWD3CR",
+"176": "DIFSEL",
+"180": "CALFACT",
+"192": "GCOMP",
+"20": "SMPR1",
+"24": "SMPR2",
+"32": "TR1",
+"36": "TR2",
+"4": "IER",
+"40": "TR3",
+"48": "SQR1",
+"52": "SQR2",
+"56": "SQR3",
+"60": "SQR4",
+"64": "DR",
+"76": "JSQR",
+"8": "CR",
+"96": "OFR1"
+}
+},
+"ADC345_Common": {
+"base": 1342179072,
+"irqs": {},
+"regs": {
+"0": "CSR",
+"12": "CDR",
+"8": "CCR"
+}
+},
+"ADC4": {
+"base": 1342178560,
+"irqs": {
+"ADC4": 61
+},
+"regs": {
+"0": "ISR",
+"100": "OFR2",
+"104": "OFR3",
+"108": "OFR4",
+"12": "CFGR",
+"128": "JDR1",
+"132": "JDR2",
+"136": "JDR3",
+"140": "JDR4",
+"16": "CFGR2",
+"160": "AWD2CR",
+"164": "AWD3CR",
+"176": "DIFSEL",
+"180": "CALFACT",
+"192": "GCOMP",
+"20": "SMPR1",
+"24": "SMPR2",
+"32": "TR1",
+"36": "TR2",
+"4": "IER",
+"40": "TR3",
+"48": "SQR1",
+"52": "SQR2",
+"56": "SQR3",
+"60": "SQR4",
+"64": "DR",
+"76": "JSQR",
+"8": "CR",
+"96": "OFR1"
+}
+},
+"ADC5": {
+"base": 1342178816,
+"irqs": {
+"ADC5": 62
+},
+"regs": {
+"0": "ISR",
+"100": "OFR2",
+"104": "OFR3",
+"108": "OFR4",
+"12": "CFGR",
+"128": "JDR1",
+"132": "JDR2",
+"136": "JDR3",
+"140": "JDR4",
+"16": "CFGR2",
+"160": "AWD2CR",
+"164": "AWD3CR",
+"176": "DIFSEL",
+"180": "CALFACT",
+"192": "GCOMP",
+"20": "SMPR1",
+"24": "SMPR2",
+"32": "TR1",
+"36": "TR2",
+"4": "IER",
+"40": "TR3",
+"48": "SQR1",
+"52": "SQR2",
+"56": "SQR3",
+"60": "SQR4",
+"64": "DR",
+"76": "JSQR",
+"8": "CR",
+"96": "OFR1"
+}
+},
+"COMP": {
+"base": 1073807872,
+"irqs": {
+"COMP1_2_3": 64,
+"COMP4_5_6": 65,
+"COMP7": 66
+},
+"regs": {
+"0": "C1CSR",
+"12": "C4CSR",
+"16": "C5CSR",
+"20": "C6CSR",
+"24": "C7CSR",
+"4": "C2CSR",
+"8": "C3CSR"
+}
+},
+"CORDIC": {
+"base": 1073875968,
+"irqs": {
+"Cordic": 100
+},
+"regs": {
+"0": "CSR",
+"4": "WDATA",
+"8": "RDATA"
+}
+},
+"CRC": {
+"base": 1073885184,
+"irqs": {},
+"regs": {
+"0": "DR",
+"16": "INIT",
+"20": "POL",
+"4": "IDR",
+"8": "CR"
+}
+},
+"CRS": {
+"base": 1073750016,
+"irqs": {},
+"regs": {
+"0": "CR",
+"12": "ICR",
+"4": "CFGR",
+"8": "ISR"
+}
+},
+"DAC1": {
+"base": 1342179328,
+"irqs": {},
+"regs": {
+"0": "CR",
+"12": "DHR12L1",
+"16": "DHR8R1",
+"20": "DHR12R2",
+"24": "DHR12L2",
+"28": "DHR8R2",
+"32": "DHR12RD",
+"36": "DHR12LD",
+"4": "SWTRGR",
+"40": "DHR8RD",
+"44": "DOR1",
+"48": "DOR2",
+"52": "SR",
+"56": "CCR",
+"60": "MCR",
+"64": "SHSR1",
+"68": "SHSR2",
+"72": "SHHR",
+"76": "SHRR",
+"8": "DHR12R1",
+"88": "STR1",
+"92": "STR2",
+"96": "STMODR"
+}
+},
+"DAC2": {
+"base": 1342180352,
+"irqs": {},
+"regs": {
+"0": "CR",
+"12": "DHR12L1",
+"16": "DHR8R1",
+"20": "DHR12R2",
+"24": "DHR12L2",
+"28": "DHR8R2",
+"32": "DHR12RD",
+"36": "DHR12LD",
+"4": "SWTRGR",
+"40": "DHR8RD",
+"44": "DOR1",
+"48": "DOR2",
+"52": "SR",
+"56": "CCR",
+"60": "MCR",
+"64": "SHSR1",
+"68": "SHSR2",
+"72": "SHHR",
+"76": "SHRR",
+"8": "DHR12R1",
+"88": "STR1",
+"92": "STR2",
+"96": "STMODR"
+}
+},
+"DAC3": {
+"base": 1342181376,
+"irqs": {},
+"regs": {
+"0": "CR",
+"12": "DHR12L1",
+"16": "DHR8R1",
+"20": "DHR12R2",
+"24": "DHR12L2",
+"28": "DHR8R2",
+"32": "DHR12RD",
+"36": "DHR12LD",
+"4": "SWTRGR",
+"40": "DHR8RD",
+"44": "DOR1",
+"48": "DOR2",
+"52": "SR",
+"56": "CCR",
+"60": "MCR",
+"64": "SHSR1",
+"68": "SHSR2",
+"72": "SHHR",
+"76": "SHRR",
+"8": "DHR12R1",
+"88": "STR1",
+"92": "STR2",
+"96": "STMODR"
+}
+},
+"DAC4": {
+"base": 1342182400,
+"irqs": {},
+"regs": {
+"0": "CR",
+"12": "DHR12L1",
+"16": "DHR8R1",
+"20": "DHR12R2",
+"24": "DHR12L2",
+"28": "DHR8R2",
+"32": "DHR12RD",
+"36": "DHR12LD",
+"4": "SWTRGR",
+"40": "DHR8RD",
+"44": "DOR1",
+"48": "DOR2",
+"52": "SR",
+"56": "CCR",
+"60": "MCR",
+"64": "SHSR1",
+"68": "SHSR2",
+"72": "SHHR",
+"76": "SHRR",
+"8": "DHR12R1",
+"88": "STR1",
+"92": "STR2",
+"96": "STMODR"
+}
+},
+"DBGMCU": {
+"base": 3758366720,
+"irqs": {},
+"regs": {
+"0": "IDCODE",
+"12": "FZ",
+"16": "FZ",
+"4": "CR",
+"8": "FZ"
+}
+},
+"DMA1": {
+"base": 1073872896,
+"irqs": {
+"DMA1_CH1": 11,
+"DMA1_CH2": 12,
+"DMA1_CH3": 13,
+"DMA1_CH4": 14,
+"DMA1_CH5": 15,
+"DMA1_CH6": 16,
+"DMA1_CH8": 96
+},
+"regs": {
+"0": "ISR",
+"100": "CMAR5",
+"108": "CCR6",
+"112": "CNDTR6",
+"116": "CPAR6",
+"12": "CNDTR1",
+"120": "CMAR6",
+"128": "CCR7",
+"132": "CNDTR7",
+"136": "CPAR7",
+"140": "CMAR7",
+"148": "CCR8",
+"152": "CNDTR8",
+"156": "CPAR8",
+"16": "CPAR1",
+"160": "CMAR8",
+"20": "CMAR1",
+"28": "CCR2",
+"32": "CNDTR2",
+"36": "CPAR2",
+"4": "IFCR",
+"40": "CMAR2",
+"48": "CCR3",
+"52": "CNDTR3",
+"56": "CPAR3",
+"60": "CMAR3",
+"68": "CCR4",
+"72": "CNDTR4",
+"76": "CPAR4",
+"8": "CCR1",
+"80": "CMAR4",
+"88": "CCR5",
+"92": "CNDTR5",
+"96": "CPAR5"
+}
+},
+"DMA2": {
+"base": 1073873920,
+"irqs": {
+"DMA1_CH7": 17,
+"DMA2_CH1": 56,
+"DMA2_CH2": 57,
+"DMA2_CH3": 58,
+"DMA2_CH4": 59,
+"DMA2_CH5": 60,
+"DMA2_CH6": 97,
+"DMA2_CH7": 98,
+"DMA2_CH8": 99
+},
+"regs": {
+"0": "ISR",
+"100": "CMAR5",
+"108": "CCR6",
+"112": "CNDTR6",
+"116": "CPAR6",
+"12": "CNDTR1",
+"120": "CMAR6",
+"128": "CCR7",
+"132": "CNDTR7",
+"136": "CPAR7",
+"140": "CMAR7",
+"148": "CCR8",
+"152": "CNDTR8",
+"156": "CPAR8",
+"16": "CPAR1",
+"160": "CMAR8",
+"20": "CMAR1",
+"28": "CCR2",
+"32": "CNDTR2",
+"36": "CPAR2",
+"4": "IFCR",
+"40": "CMAR2",
+"48": "CCR3",
+"52": "CNDTR3",
+"56": "CPAR3",
+"60": "CMAR3",
+"68": "CCR4",
+"72": "CNDTR4",
+"76": "CPAR4",
+"8": "CCR1",
+"80": "CMAR4",
+"88": "CCR5",
+"92": "CNDTR5",
+"96": "CPAR5"
+}
+},
+"DMAMUX": {
+"base": 1073874944,
+"irqs": {
+"DMAMUX_OVR": 94
+},
+"regs": {
+"0": "C0CR",
+"12": "C3CR",
+"128": "CSR",
+"132": "CFR",
+"16": "C4CR",
+"20": "C5CR",
+"24": "C6CR",
+"256": "RG0CR",
+"260": "RG1CR",
+"264": "RG2CR",
+"268": "RG3CR",
+"28": "C7CR",
+"32": "C8CR",
+"320": "RGSR",
+"324": "RGCFR",
+"36": "C9CR",
+"4": "C1CR",
+"40": "C10CR",
+"44": "C11CR",
+"48": "C12CR",
+"52": "C13CR",
+"56": "C14CR",
+"60": "C15CR",
+"8": "C2CR"
+}
+},
+"EXTI": {
+"base": 1073808384,
+"irqs": {
+"CRS": 75,
+"EXTI0": 6,
+"EXTI1": 7,
+"EXTI15_10": 40,
+"EXTI2": 8,
+"EXTI3": 9,
+"EXTI4": 10,
+"EXTI9_5": 23,
+"PVD_PVM": 1,
+"USBWakeUP": 42,
+"USB_HP": 19,
+"USB_LP": 20
+},
+"regs": {
+"0": "IMR1",
+"12": "FTSR1",
+"16": "SWIER1",
+"20": "PR1",
+"32": "IMR2",
+"36": "EMR2",
+"4": "EMR1",
+"40": "RTSR2",
+"44": "FTSR2",
+"48": "SWIER2",
+"52": "PR2",
+"8": "RTSR1"
+}
+},
+"FDCAN": {
+"base": 1073783808,
+"irqs": {},
+"regs": {
+"0": "CREL",
+"12": "DBTP",
+"128": "RXGFC",
+"132": "XIDAM",
+"136": "HPMS",
+"144": "RXF0S",
+"148": "RXF0A",
+"152": "RXF1S",
+"156": "RXF1A",
+"16": "TEST",
+"192": "TXBC",
+"196": "TXFQS",
+"20": "RWD",
+"200": "TXBRP",
+"204": "TXBAR",
+"208": "TXBCR",
+"212": "TXBTO",
+"216": "TXBCF",
+"220": "TXBTIE",
+"224": "TXBCIE",
+"228": "TXEFS",
+"232": "TXEFA",
+"24": "CCCR",
+"256": "CKDIV",
+"28": "NBTP",
+"32": "TSCC",
+"36": "TSCV",
+"4": "ENDN",
+"40": "TOCC",
+"44": "TOCV",
+"64": "ECR",
+"68": "PSR",
+"72": "TDCR",
+"80": "IR",
+"84": "IE",
+"88": "ILS",
+"92": "ILE"
+}
+},
+"FDCAN1": {
+"base": 1073767424,
+"irqs": {
+"FDCAN1_IT0": 21,
+"FDCAN1_IT1": 22
+},
+"regs": {
+"0": "CREL",
+"12": "DBTP",
+"128": "RXGFC",
+"132": "XIDAM",
+"136": "HPMS",
+"144": "RXF0S",
+"148": "RXF0A",
+"152": "RXF1S",
+"156": "RXF1A",
+"16": "TEST",
+"192": "TXBC",
+"196": "TXFQS",
+"20": "RWD",
+"200": "TXBRP",
+"204": "TXBAR",
+"208": "TXBCR",
+"212": "TXBTO",
+"216": "TXBCF",
+"220": "TXBTIE",
+"224": "TXBCIE",
+"228": "TXEFS",
+"232": "TXEFA",
+"24": "CCCR",
+"256": "CKDIV",
+"28": "NBTP",
+"32": "TSCC",
+"36": "TSCV",
+"4": "ENDN",
+"40": "TOCC",
+"44": "TOCV",
+"64": "ECR",
+"68": "PSR",
+"72": "TDCR",
+"80": "IR",
+"84": "IE",
+"88": "ILS",
+"92": "ILE"
+}
+},
+"FDCAN2": {
+"base": 1073768448,
+"irqs": {
+"FDCAN2_IT0": 86,
+"FDCAN2_IT1": 87
+},
+"regs": {
+"0": "CREL",
+"12": "DBTP",
+"128": "RXGFC",
+"132": "XIDAM",
+"136": "HPMS",
+"144": "RXF0S",
+"148": "RXF0A",
+"152": "RXF1S",
+"156": "RXF1A",
+"16": "TEST",
+"192": "TXBC",
+"196": "TXFQS",
+"20": "RWD",
+"200": "TXBRP",
+"204": "TXBAR",
+"208": "TXBCR",
+"212": "TXBTO",
+"216": "TXBCF",
+"220": "TXBTIE",
+"224": "TXBCIE",
+"228": "TXEFS",
+"232": "TXEFA",
+"24": "CCCR",
+"256": "CKDIV",
+"28": "NBTP",
+"32": "TSCC",
+"36": "TSCV",
+"4": "ENDN",
+"40": "TOCC",
+"44": "TOCV",
+"64": "ECR",
+"68": "PSR",
+"72": "TDCR",
+"80": "IR",
+"84": "IE",
+"88": "ILS",
+"92": "ILE"
+}
+},
+"FDCAN3": {
+"base": 1073769472,
+"irqs": {
+"FDCAN3_IT0": 88,
+"FDCAN3_IT1": 89
+},
+"regs": {
+"0": "CREL",
+"12": "DBTP",
+"128": "RXGFC",
+"132": "XIDAM",
+"136": "HPMS",
+"144": "RXF0S",
+"148": "RXF0A",
+"152": "RXF1S",
+"156": "RXF1A",
+"16": "TEST",
+"192": "TXBC",
+"196": "TXFQS",
+"20": "RWD",
+"200": "TXBRP",
+"204": "TXBAR",
+"208": "TXBCR",
+"212": "TXBTO",
+"216": "TXBCF",
+"220": "TXBTIE",
+"224": "TXBCIE",
+"228": "TXEFS",
+"232": "TXEFA",
+"24": "CCCR",
+"256": "CKDIV",
+"28": "NBTP",
+"32": "TSCC",
+"36": "TSCV",
+"4": "ENDN",
+"40": "TOCC",
+"44": "TOCV",
+"64": "ECR",
+"68": "PSR",
+"72": "TDCR",
+"80": "IR",
+"84": "IE",
+"88": "ILS",
+"92": "ILE"
+}
+},
+"FLASH": {
+"base": 1073881088,
+"irqs": {
+"FLASH": 4
+},
+"regs": {
+"0": "ACR",
+"112": "SEC1R",
+"12": "OPTKEYR",
+"16": "SR",
+"20": "CR",
+"24": "ECCR",
+"32": "OPTR",
+"36": "PCROP1SR",
+"4": "PDKEYR",
+"40": "PCROP1ER",
+"44": "WRP1AR",
+"48": "WRP1BR",
+"8": "KEYR"
+}
+},
+"FMAC": {
+"base": 1073878016,
+"irqs": {
+"FMAC": 101
+},
+"regs": {
+"0": "X1BUFCFG",
+"12": "PARAM",
+"16": "CR",
+"20": "SR",
+"24": "WDATA",
+"28": "RDATA",
+"4": "X2BUFCFG",
+"8": "YBUFCFG"
+}
+},
+"FMC": {
+"base": 2684354560,
+"irqs": {
+"FMC": 48
+},
+"regs": {
+"0": "BCR1",
+"12": "BTR2",
+"128": "PCR",
+"132": "SR",
+"136": "PMEM",
+"140": "PATT",
+"148": "ECCR",
+"16": "BCR3",
+"20": "BTR3",
+"24": "BCR4",
+"260": "BWTR1",
+"268": "BWTR2",
+"276": "BWTR3",
+"28": "BTR4",
+"284": "BWTR4",
+"32": "PCSCNTR",
+"4": "BTR1",
+"8": "BCR2"
+}
+},
+"FPU": {
+"base": 3758157620,
+"irqs": {
+"FPU": 81
+},
+"regs": {
+"0": "FPCCR",
+"4": "FPCAR",
+"8": "FPSCR"
+}
+},
+"FPU_CPACR": {
+"base": 3758157192,
+"irqs": {},
+"regs": {
+"0": "CPACR"
+}
+},
+"GPIOA": {
+"base": 1207959552,
+"irqs": {},
+"regs": {
+"0": "MODER",
+"12": "PUPDR",
+"16": "IDR",
+"20": "ODR",
+"24": "BSRR",
+"28": "LCKR",
+"32": "AFRL",
+"36": "AFRH",
+"4": "OTYPER",
+"40": "BRR",
+"8": "OSPEEDR"
+}
+},
+"GPIOB": {
+"base": 1207960576,
+"irqs": {},
+"regs": {
+"0": "MODER",
+"12": "PUPDR",
+"16": "IDR",
+"20": "ODR",
+"24": "BSRR",
+"28": "LCKR",
+"32": "AFRL",
+"36": "AFRH",
+"4": "OTYPER",
+"40": "BRR",
+"8": "OSPEEDR"
+}
+},
+"GPIOC": {
+"base": 1207961600,
+"irqs": {},
+"regs": {
+"0": "MODER",
+"12": "PUPDR",
+"16": "IDR",
+"20": "ODR",
+"24": "BSRR",
+"28": "LCKR",
+"32": "AFRL",
+"36": "AFRH",
+"4": "OTYPER",
+"40": "BRR",
+"8": "OSPEEDR"
+}
+},
+"GPIOD": {
+"base": 1207962624,
+"irqs": {},
+"regs": {
+"0": "MODER",
+"12": "PUPDR",
+"16": "IDR",
+"20": "ODR",
+"24": "BSRR",
+"28": "LCKR",
+"32": "AFRL",
+"36": "AFRH",
+"4": "OTYPER",
+"40": "BRR",
+"8": "OSPEEDR"
+}
+},
+"GPIOE": {
+"base": 1207963648,
+"irqs": {},
+"regs": {
+"0": "MODER",
+"12": "PUPDR",
+"16": "IDR",
+"20": "ODR",
+"24": "BSRR",
+"28": "LCKR",
+"32": "AFRL",
+"36": "AFRH",
+"4": "OTYPER",
+"40": "BRR",
+"8": "OSPEEDR"
+}
+},
+"GPIOF": {
+"base": 1207964672,
+"irqs": {},
+"regs": {
+"0": "MODER",
+"12": "PUPDR",
+"16": "IDR",
+"20": "ODR",
+"24": "BSRR",
+"28": "LCKR",
+"32": "AFRL",
+"36": "AFRH",
+"4": "OTYPER",
+"40": "BRR",
+"8": "OSPEEDR"
+}
+},
+"GPIOG": {
+"base": 1207965696,
+"irqs": {},
+"regs": {
+"0": "MODER",
+"12": "PUPDR",
+"16": "IDR",
+"20": "ODR",
+"24": "BSRR",
+"28": "LCKR",
+"32": "AFRL",
+"36": "AFRH",
+"4": "OTYPER",
+"40": "BRR",
+"8": "OSPEEDR"
+}
+},
+"HRTIM_Common": {
+"base": 1073834880,
+"irqs": {
+"HRTIM_TIM_FLT_IRQn": 73
+},
+"regs": {
+"0": "CR1",
+"100": "BDTCUPR",
+"104": "BDTDUPR",
+"108": "BDTEUPR",
+"112": "BDMADR",
+"116": "BDTFUPR",
+"12": "ICR",
+"120": "ADCER",
+"124": "ADCUR",
+"128": "ADCPS1",
+"132": "ADCPS2",
+"136": "FLTINR3",
+"140": "FLTINR4",
+"16": "IER",
+"20": "OENR",
+"24": "ODISR",
+"28": "ODSR",
+"32": "BMCR",
+"36": "BMTRG",
+"4": "CR2",
+"40": "BMCMPR",
+"44": "BMPER",
+"48": "EECR1",
+"52": "EECR2",
+"56": "EECR3",
+"60": "ADC1R",
+"64": "ADC2R",
+"68": "ADC3R",
+"72": "ADC4R",
+"76": "DLLCR",
+"8": "ISR",
+"80": "FLTINR1",
+"84": "FLTINR2",
+"88": "BDMUPDR",
+"92": "BDTAUPR",
+"96": "BDTBUPR"
+}
+},
+"HRTIM_Master": {
+"base": 1073833984,
+"irqs": {
+"HRTIM_Master_IRQn": 67
+},
+"regs": {
+"0": "MCR",
+"12": "MDIER",
+"16": "MCNTR",
+"20": "MPER",
+"24": "MREP",
+"28": "MCMP1R",
+"36": "MCMP2R",
+"4": "MISR",
+"40": "MCMP3R",
+"44": "MCMP4R",
+"8": "MICR"
+}
+},
+"HRTIM_TIMA": {
+"base": 1073834112,
+"irqs": {
+"HRTIM_TIMA_IRQn": 68
+},
+"regs": {
+"0": "TIMACR",
+"100": "OUTAR",
+"104": "FLTAR",
+"108": "TIMACR2",
+"112": "AEEFR3",
+"12": "TIMADIER",
+"16": "CNTAR",
+"20": "PERAR",
+"24": "REPAR",
+"28": "CMP1AR",
+"32": "CMP1CAR",
+"36": "CMP2AR",
+"4": "TIMAISR",
+"40": "CMP3AR",
+"44": "CMP4AR",
+"48": "CPT1AR",
+"52": "CPT2AR",
+"56": "DTAR",
+"60": "SETA1R",
+"64": "RSTA1R",
+"68": "SETA2R",
+"72": "RSTA2R",
+"76": "EEFAR1",
+"8": "TIMAICR",
+"80": "EEFAR2",
+"84": "RSTAR",
+"88": "CHPAR",
+"92": "CPT1ACR",
+"96": "CPT2ACR"
+}
+},
+"HRTIM_TIMB": {
+"base": 1073834240,
+"irqs": {
+"HRTIM_TIMB_IRQn": 69
+},
+"regs": {
+"0": "TIMBCR",
+"100": "OUTBR",
+"104": "FLTBR",
+"108": "TIMBCR2",
+"112": "BEEFR3",
+"12": "TIMBDIER",
+"16": "CNTR",
+"20": "PERBR",
+"24": "REPBR",
+"28": "CMP1BR",
+"32": "CMP1CBR",
+"36": "CMP2BR",
+"4": "TIMBISR",
+"40": "CMP3BR",
+"44": "CMP4BR",
+"48": "CPT1BR",
+"52": "CPT2BR",
+"56": "DTBR",
+"60": "SETB1R",
+"64": "RSTB1R",
+"68": "SETB2R",
+"72": "RSTB2R",
+"76": "EEFBR1",
+"8": "TIMBICR",
+"80": "EEFBR2",
+"84": "RSTBR",
+"88": "CHPBR",
+"92": "CPT1BCR",
+"96": "CPT2BCR"
+}
+},
+"HRTIM_TIMC": {
+"base": 1073834368,
+"irqs": {
+"HRTIM_TIMC_IRQn": 70
+},
+"regs": {
+"0": "TIMCCR",
+"100": "OUTCR",
+"104": "FLTCR",
+"108": "TIMCCR2",
+"112": "CEEFR3",
+"12": "TIMCDIER",
+"16": "CNTCR",
+"20": "PERCR",
+"24": "REPCR",
+"28": "CMP1CR",
+"32": "CMP1CCR",
+"36": "CMP2CR",
+"4": "TIMCISR",
+"40": "CMP3CR",
+"44": "CMP4CR",
+"48": "CPT1CR",
+"52": "CPT2CR",
+"56": "DTCR",
+"60": "SETC1R",
+"64": "RSTC1R",
+"68": "SETC2R",
+"72": "RSTC2R",
+"76": "EEFCR1",
+"8": "TIMCICR",
+"80": "EEFCR2",
+"84": "RSTCR",
+"88": "CHPCR",
+"92": "CPT1CCR",
+"96": "CPT2CCR"
+}
+},
+"HRTIM_TIMD": {
+"base": 1073834496,
+"irqs": {
+"HRTIM_TIMD_IRQn": 71
+},
+"regs": {
+"0": "TIMDCR",
+"100": "OUTDR",
+"104": "FLTDR",
+"108": "TIMDCR2",
+"112": "DEEFR3",
+"12": "TIMDDIER",
+"16": "CNTDR",
+"20": "PERDR",
+"24": "REPDR",
+"28": "CMP1DR",
+"32": "CMP1CDR",
+"36": "CMP2DR",
+"4": "TIMDISR",
+"40": "CMP3DR",
+"44": "CMP4DR",
+"48": "CPT1DR",
+"52": "CPT2DR",
+"56": "DTDR",
+"60": "SETD1R",
+"64": "RSTD1R",
+"68": "SETD2R",
+"72": "RSTD2R",
+"76": "EEFDR1",
+"8": "TIMDICR",
+"80": "EEFDR2",
+"84": "RSTDR",
+"88": "CHPDR",
+"92": "CPT1DCR",
+"96": "CPT2DCR"
+}
+},
+"HRTIM_TIME": {
+"base": 1073834624,
+"irqs": {},
+"regs": {
+"0": "TIMECR",
+"100": "OUTER",
+"104": "FLTER",
+"108": "TIMECR2",
+"112": "EEEFR3",
+"12": "TIMEDIER",
+"16": "CNTER",
+"20": "PERER",
+"24": "REPER",
+"28": "CMP1ER",
+"32": "CMP1CER",
+"36": "CMP2ER",
+"4": "TIMEISR",
+"40": "CMP3ER",
+"44": "CMP4ER",
+"48": "CPT1ER",
+"52": "CPT2ER",
+"56": "DTER",
+"60": "SETE1R",
+"64": "RSTE1R",
+"68": "SETE2R",
+"72": "RSTE2R",
+"76": "EEFER1",
+"8": "TIMEICR",
+"80": "EEFER2",
+"84": "RSTER",
+"88": "CHPER",
+"92": "CPT1ECR",
+"96": "CPT2ECR"
+}
+},
+"HRTIM_TIMF": {
+"base": 1073834752,
+"irqs": {
+"HRTIM_TIME_IRQn": 72,
+"HRTIM_TIMF_IRQn": 74
+},
+"regs": {
+"0": "TIMFCR",
+"100": "OUTFR",
+"104": "FLTFR",
+"108": "TIMFCR2",
+"112": "FEEFR3",
+"12": "TIMFDIER",
+"16": "CNTFR",
+"20": "PERFR",
+"24": "REPFR",
+"28": "CMP1FR",
+"32": "CMP1CFR",
+"36": "CMP2FR",
+"4": "TIMFISR",
+"40": "CMP3FR",
+"44": "CMP4FR",
+"48": "CPT1FR",
+"52": "CPT2FR",
+"56": "DTFR",
+"60": "SETF1R",
+"64": "RSTE1R",
+"68": "SETF2R",
+"72": "RSTF2R",
+"76": "EEFFR1",
+"8": "TIMFICR",
+"80": "EEFFR2",
+"84": "RSTFR",
+"88": "CHPFR",
+"92": "CPT1FCR",
+"96": "CPT2FCR"
+}
+},
+"I2C1": {
+"base": 1073763328,
+"irqs": {
+"I2C1_ER": 32,
+"I2C1_EV": 31
+},
+"regs": {
+"0": "CR1",
+"12": "OAR2",
+"16": "TIMINGR",
+"20": "TIMEOUTR",
+"24": "ISR",
+"28": "ICR",
+"32": "PECR",
+"36": "RXDR",
+"4": "CR2",
+"40": "TXDR",
+"8": "OAR1"
+}
+},
+"I2C2": {
+"base": 1073764352,
+"irqs": {
+"I2C2_ER": 34,
+"I2C2_EV": 33,
+"WWDG": 0
+},
+"regs": {
+"0": "CR1",
+"12": "OAR2",
+"16": "TIMINGR",
+"20": "TIMEOUTR",
+"24": "ISR",
+"28": "ICR",
+"32": "PECR",
+"36": "RXDR",
+"4": "CR2",
+"40": "TXDR",
+"8": "OAR1"
+}
+},
+"I2C3": {
+"base": 1073772544,
+"irqs": {
+"I2C3_ER": 93,
+"I2C3_EV": 92
+},
+"regs": {
+"0": "CR1",
+"12": "OAR2",
+"16": "TIMINGR",
+"20": "TIMEOUTR",
+"24": "ISR",
+"28": "ICR",
+"32": "PECR",
+"36": "RXDR",
+"4": "CR2",
+"40": "TXDR",
+"8": "OAR1"
+}
+},
+"I2C4": {
+"base": 1073775616,
+"irqs": {
+"I2C4_ER": 83,
+"I2C4_EV": 82
+},
+"regs": {
+"0": "CR1",
+"12": "OAR2",
+"16": "TIMINGR",
+"20": "TIMEOUTR",
+"24": "ISR",
+"28": "ICR",
+"32": "PECR",
+"36": "RXDR",
+"4": "CR2",
+"40": "TXDR",
+"8": "OAR1"
+}
+},
+"IWDG": {
+"base": 1073754112,
+"irqs": {},
+"regs": {
+"0": "KR",
+"12": "SR",
+"16": "WINR",
+"4": "PR",
+"8": "RLR"
+}
+},
+"LPTIMER1": {
+"base": 1073773568,
+"irqs": {},
+"regs": {
+"0": "ISR",
+"12": "CFGR",
+"16": "CR",
+"20": "CMP",
+"24": "ARR",
+"28": "CNT",
+"32": "OR",
+"4": "ICR",
+"8": "IER"
+}
+},
+"LPUART1": {
+"base": 1073774592,
+"irqs": {
+"LPTIM1": 49,
+"LPUART": 91
+},
+"regs": {
+"0": "CR1",
+"12": "BRR",
+"24": "RQR",
+"28": "ISR",
+"32": "ICR",
+"36": "RDR",
+"4": "CR2",
+"40": "TDR",
+"44": "PRESC",
+"8": "CR3"
+}
+},
+"MPU": {
+"base": 3758153860,
+"irqs": {},
+"regs": {
+"0": "TYPER",
+"12": "RBAR",
+"16": "RASR",
+"4": "CTRL",
+"8": "RNR"
+}
+},
+"NVIC": {
+"base": 3758153984,
+"irqs": {},
+"regs": {
+"0": "ISER0",
+"12": "ISER3",
+"128": "ICER0",
+"132": "ICER1",
+"136": "ICER2",
+"140": "ICER3",
+"256": "ISPR0",
+"260": "ISPR1",
+"264": "ISPR2",
+"268": "ISPR3",
+"384": "ICPR0",
+"388": "ICPR1",
+"392": "ICPR2",
+"396": "ICPR3",
+"4": "ISER1",
+"512": "IABR0",
+"516": "IABR1",
+"520": "IABR2",
+"524": "IABR3",
+"768": "IPR0",
+"772": "IPR1",
+"776": "IPR2",
+"780": "IPR3",
+"784": "IPR4",
+"788": "IPR5",
+"792": "IPR6",
+"796": "IPR7",
+"8": "ISER2",
+"800": "IPR8",
+"804": "IPR9",
+"808": "IPR10",
+"812": "IPR11",
+"816": "IPR12",
+"820": "IPR13",
+"824": "IPR14",
+"828": "IPR15",
+"832": "IPR16",
+"836": "IPR17",
+"840": "IPR18",
+"844": "IPR19",
+"848": "IPR20",
+"852": "IPR21",
+"856": "IPR22",
+"860": "IPR23",
+"864": "IPR24",
+"868": "IPR25"
+}
+},
+"NVIC_STIR": {
+"base": 3758157568,
+"irqs": {},
+"regs": {
+"0": "STIR"
+}
+},
+"OPAMP": {
+"base": 1073808128,
+"irqs": {},
+"regs": {
+"0": "CSR",
+"12": "CSR",
+"16": "CSR",
+"20": "CSR",
+"24": "TCMR",
+"28": "TCMR",
+"32": "TCMR",
+"36": "TCMR",
+"4": "CSR",
+"40": "TCMR",
+"44": "TCMR",
+"8": "CSR"
+}
+},
+"PWR": {
+"base": 1073770496,
+"irqs": {},
+"regs": {
+"0": "CR1",
+"12": "CR4",
+"128": "CR5",
+"16": "SR1",
+"20": "SR2",
+"24": "SCR",
+"32": "PUCRA",
+"36": "PDCRA",
+"4": "CR2",
+"40": "PUCRB",
+"44": "PDCRB",
+"48": "PUCRC",
+"52": "PDCRC",
+"56": "PUCRD",
+"60": "PDCRD",
+"64": "PUCRE",
+"68": "PDCRE",
+"72": "PUCRF",
+"76": "PDCRF",
+"8": "CR3",
+"80": "PUCRG",
+"84": "PDCRG"
+}
+},
+"QUADSPI": {
+"base": 2684358656,
+"irqs": {
+"QUADSPI": 95
+},
+"regs": {
+"0": "CR",
+"12": "FCR",
+"16": "DLR",
+"20": "CCR",
+"24": "AR",
+"28": "ABR",
+"32": "DR",
+"36": "PSMKR",
+"4": "DCR",
+"40": "PSMAR",
+"44": "PIR",
+"48": "LPTR",
+"8": "SR"
+}
+},
+"RCC": {
+"base": 1073876992,
+"irqs": {
+"RCC": 5
+},
+"regs": {
+"0": "CR",
+"104": "AHB1SMENR",
+"108": "AHB2SMENR",
+"112": "AHB3SMENR",
+"12": "PLLCFGR",
+"120": "APB1SMENR1",
+"124": "APB1SMENR2",
+"128": "APB2SMENR",
+"136": "CCIPR",
+"144": "BDCR",
+"148": "CSR",
+"152": "CRRCR",
+"156": "CCIPR2",
+"24": "CIER",
+"28": "CIFR",
+"32": "CICR",
+"4": "ICSCR",
+"40": "AHB1RSTR",
+"44": "AHB2RSTR",
+"48": "AHB3RSTR",
+"56": "APB1RSTR1",
+"60": "APB1RSTR2",
+"64": "APB2RSTR",
+"72": "AHB1ENR",
+"76": "AHB2ENR",
+"8": "CFGR",
+"80": "AHB3ENR",
+"88": "APB1ENR1",
+"92": "APB1ENR2",
+"96": "APB2ENR"
+}
+},
+"RNG": {
+"base": 1342572544,
+"irqs": {
+"RNG": 90
+},
+"regs": {
+"0": "CR",
+"4": "SR",
+"8": "DR"
+}
+},
+"RTC": {
+"base": 1073752064,
+"irqs": {
+"RTC_ALARM": 41,
+"RTC_TAMP_CSS_LSE": 2,
+"RTC_WKUP": 3
+},
+"regs": {
+"0": "TR",
+"12": "ICSR",
+"16": "PRER",
+"20": "WUTR",
+"24": "CR",
+"36": "WPR",
+"4": "DR",
+"40": "CALR",
+"44": "SHIFTR",
+"48": "TSTR",
+"52": "TSDR",
+"56": "TSSSR",
+"64": "ALRMAR",
+"68": "ALRMASSR",
+"72": "ALRMBR",
+"76": "ALRMBSSR",
+"8": "SSR",
+"80": "SR",
+"84": "MISR",
+"92": "SCR"
+}
+},
+"SAI": {
+"base": 1073828864,
+"irqs": {
+"SAI": 76
+},
+"regs": {
+"12": "AFRCR",
+"16": "ASLOTR",
+"20": "AIM",
+"24": "ASR",
+"28": "ACLRFR",
+"32": "ADR",
+"36": "BCR1",
+"4": "ACR1",
+"40": "BCR2",
+"44": "BFRCR",
+"48": "BSLOTR",
+"52": "BIM",
+"56": "BSR",
+"60": "BCLRFR",
+"64": "BDR",
+"68": "PDMCR",
+"72": "PDMDLY",
+"8": "ACR2"
+}
+},
+"SCB": {
+"base": 3758157056,
+"irqs": {},
+"regs": {
+"0": "CPUID",
+"12": "AIRCR",
+"16": "SCR",
+"20": "CCR",
+"24": "SHPR1",
+"28": "SHPR2",
+"32": "SHPR3",
+"36": "SHCSR",
+"4": "ICSR",
+"40": "UFSR_BFSR_MMFSR",
+"44": "HFSR",
+"52": "MMFAR",
+"56": "BFAR",
+"60": "AFSR",
+"8": "VTOR"
+}
+},
+"SCB_ACTLR": {
+"base": 3758153736,
+"irqs": {},
+"regs": {
+"0": "ACTRL"
+}
+},
+"SPI1": {
+"base": 1073819648,
+"irqs": {
+"SPI1": 35
+},
+"regs": {
+"0": "CR1",
+"12": "DR",
+"16": "CRCPR",
+"20": "RXCRCR",
+"24": "TXCRCR",
+"28": "I2SCFGR",
+"32": "I2SPR",
+"4": "CR2",
+"8": "SR"
+}
+},
+"SPI2": {
+"base": 1073756160,
+"irqs": {
+"SPI2": 36
+},
+"regs": {
+"0": "CR1",
+"12": "DR",
+"16": "CRCPR",
+"20": "RXCRCR",
+"24": "TXCRCR",
+"28": "I2SCFGR",
+"32": "I2SPR",
+"4": "CR2",
+"8": "SR"
+}
+},
+"SPI3": {
+"base": 1073757184,
+"irqs": {
+"SPI3": 51
+},
+"regs": {
+"0": "CR1",
+"12": "DR",
+"16": "CRCPR",
+"20": "RXCRCR",
+"24": "TXCRCR",
+"28": "I2SCFGR",
+"32": "I2SPR",
+"4": "CR2",
+"8": "SR"
+}
+},
+"SPI4": {
+"base": 1073822720,
+"irqs": {
+"SPI4": 84
+},
+"regs": {
+"0": "CR1",
+"12": "DR",
+"16": "CRCPR",
+"20": "RXCRCR",
+"24": "TXCRCR",
+"28": "I2SCFGR",
+"32": "I2SPR",
+"4": "CR2",
+"8": "SR"
+}
+},
+"STK": {
+"base": 3758153744,
+"irqs": {},
+"regs": {
+"0": "CTRL",
+"12": "CALIB",
+"4": "LOAD",
+"8": "VAL"
+}
+},
+"SYSCFG": {
+"base": 1073807360,
+"irqs": {},
+"regs": {
+"0": "MEMRMP",
+"12": "EXTICR2",
+"16": "EXTICR3",
+"20": "EXTICR4",
+"24": "SCSR",
+"28": "CFGR2",
+"32": "SWPR",
+"36": "SKR",
+"4": "CFGR1",
+"8": "EXTICR1"
+}
+},
+"TAMP": {
+"base": 1073751040,
+"irqs": {},
+"regs": {
+"0": "CR1",
+"12": "FLTCR",
+"256": "BKP0R",
+"260": "BKP1R",
+"264": "BKP2R",
+"268": "BKP3R",
+"272": "BKP4R",
+"276": "BKP5R",
+"280": "BKP6R",
+"284": "BKP7R",
+"288": "BKP8R",
+"292": "BKP9R",
+"296": "BKP10R",
+"300": "BKP11R",
+"304": "BKP12R",
+"308": "BKP13R",
+"312": "BKP14R",
+"316": "BKP15R",
+"320": "BKP16R",
+"324": "BKP17R",
+"328": "BKP18R",
+"332": "BKP19R",
+"336": "BKP20R",
+"340": "BKP21R",
+"344": "BKP22R",
+"348": "BKP23R",
+"352": "BKP24R",
+"356": "BKP25R",
+"360": "BKP26R",
+"364": "BKP27R",
+"368": "BKP28R",
+"372": "BKP29R",
+"376": "BKP30R",
+"380": "BKP31R",
+"4": "CR2",
+"44": "IER",
+"48": "SR",
+"52": "MISR",
+"60": "SCR"
+}
+},
+"TIM1": {
+"base": 1073818624,
+"irqs": {
+"TIM1_BRK_TIM15": 24,
+"TIM1_CC": 27,
+"TIM1_TRG_COM": 26,
+"TIM1_UP_TIM16": 25,
+"TIM8_CC": 46
+},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"28": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"56": "CCR2",
+"60": "CCR3",
+"64": "CCR4",
+"68": "BDTR",
+"72": "CCR5",
+"76": "CCR6",
+"8": "SMCR",
+"80": "Output",
+"84": "DTR2",
+"88": "ECR",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM15": {
+"base": 1073823744,
+"irqs": {},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"56": "CCR2",
+"68": "BDTR",
+"8": "SMCR",
+"84": "DTR2",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM16": {
+"base": 1073824768,
+"irqs": {},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"104": "OR1",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"68": "BDTR",
+"84": "DTR2",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM17": {
+"base": 1073825792,
+"irqs": {},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"104": "OR1",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"68": "BDTR",
+"84": "DTR2",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM2": {
+"base": 1073741824,
+"irqs": {
+"TIM2": 28
+},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"28": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"56": "CCR2",
+"60": "CCR3",
+"64": "CCR4",
+"68": "BDTR",
+"72": "CCR5",
+"76": "CCR6",
+"8": "SMCR",
+"80": "Output",
+"84": "DTR2",
+"88": "ECR",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM20": {
+"base": 1073827840,
+"irqs": {
+"TIM20_BRK": 77,
+"TIM20_CC": 80,
+"TIM20_TRG_COM": 79,
+"TIM20_UP": 78
+},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"28": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"56": "CCR2",
+"60": "CCR3",
+"64": "CCR4",
+"68": "BDTR",
+"72": "CCR5",
+"76": "CCR6",
+"8": "SMCR",
+"80": "Output",
+"84": "DTR2",
+"88": "ECR",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM3": {
+"base": 1073742848,
+"irqs": {
+"TIM3": 29
+},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"28": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"56": "CCR2",
+"60": "CCR3",
+"64": "CCR4",
+"68": "BDTR",
+"72": "CCR5",
+"76": "CCR6",
+"8": "SMCR",
+"80": "Output",
+"84": "DTR2",
+"88": "ECR",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM4": {
+"base": 1073743872,
+"irqs": {
+"TIM4": 30
+},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"28": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"56": "CCR2",
+"60": "CCR3",
+"64": "CCR4",
+"68": "BDTR",
+"72": "CCR5",
+"76": "CCR6",
+"8": "SMCR",
+"80": "Output",
+"84": "DTR2",
+"88": "ECR",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM5": {
+"base": 1073744896,
+"irqs": {
+"TIM5": 50
+},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"28": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"56": "CCR2",
+"60": "CCR3",
+"64": "CCR4",
+"68": "BDTR",
+"72": "CCR5",
+"76": "CCR6",
+"8": "SMCR",
+"80": "Output",
+"84": "DTR2",
+"88": "ECR",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"TIM6": {
+"base": 1073745920,
+"irqs": {
+"TIM6_DACUNDER": 54
+},
+"regs": {
+"0": "CR1",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR"
+}
+},
+"TIM7": {
+"base": 1073746944,
+"irqs": {
+"TIM7": 55
+},
+"regs": {
+"0": "CR1",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR"
+}
+},
+"TIM8": {
+"base": 1073820672,
+"irqs": {
+"TIM8_BRK": 43,
+"TIM8_TRG_COM": 45,
+"TIM8_UP": 44
+},
+"regs": {
+"0": "CR1",
+"100": "AF2",
+"12": "DIER",
+"16": "SR",
+"20": "EGR",
+"24": "Input",
+"28": "Input",
+"32": "CCER",
+"36": "CNT",
+"4": "CR2",
+"40": "PSC",
+"44": "ARR",
+"48": "RCR",
+"52": "CCR1",
+"56": "CCR2",
+"60": "CCR3",
+"64": "CCR4",
+"68": "BDTR",
+"72": "CCR5",
+"76": "CCR6",
+"8": "SMCR",
+"80": "Output",
+"84": "DTR2",
+"88": "ECR",
+"92": "TISEL",
+"96": "AF1",
+"988": "DCR",
+"992": "DMAR"
+}
+},
+"UART4": {
+"base": 1073761280,
+"irqs": {
+"UART4": 52
+},
+"regs": {
+"0": "CR1",
+"12": "BRR",
+"16": "GTPR",
+"20": "RTOR",
+"24": "RQR",
+"28": "ISR",
+"32": "ICR",
+"36": "RDR",
+"4": "CR2",
+"40": "TDR",
+"44": "PRESC",
+"8": "CR3"
+}
+},
+"UART5": {
+"base": 1073762304,
+"irqs": {
+"UART5": 53
+},
+"regs": {
+"0": "CR1",
+"12": "BRR",
+"16": "GTPR",
+"20": "RTOR",
+"24": "RQR",
+"28": "ISR",
+"32": "ICR",
+"36": "RDR",
+"4": "CR2",
+"40": "TDR",
+"44": "PRESC",
+"8": "CR3"
+}
+},
+"UCPD1": {
+"base": 1073782784,
+"irqs": {
+"UCPD1": 63
+},
+"regs": {
+"0": "CFG1",
+"12": "CR",
+"16": "IMR",
+"20": "SR",
+"24": "ICR",
+"28": "ORDSET",
+"32": "PAYSZ",
+"36": "TXDR",
+"4": "CFG2",
+"40": "ORDSET",
+"44": "PAYSZ",
+"48": "RXDR",
+"52": "ORDEXT1",
+"56": "ORDEXT2"
+}
+},
+"USART1": {
+"base": 1073821696,
+"irqs": {
+"USART1": 37
+},
+"regs": {
+"0": "CR1",
+"12": "BRR",
+"16": "GTPR",
+"20": "RTOR",
+"24": "RQR",
+"28": "ISR",
+"32": "ICR",
+"36": "RDR",
+"4": "CR2",
+"40": "TDR",
+"44": "PRESC",
+"8": "CR3"
+}
+},
+"USART2": {
+"base": 1073759232,
+"irqs": {
+"USART2": 38
+},
+"regs": {
+"0": "CR1",
+"12": "BRR",
+"16": "GTPR",
+"20": "RTOR",
+"24": "RQR",
+"28": "ISR",
+"32": "ICR",
+"36": "RDR",
+"4": "CR2",
+"40": "TDR",
+"44": "PRESC",
+"8": "CR3"
+}
+},
+"USART3": {
+"base": 1073760256,
+"irqs": {
+"USART3": 39
+},
+"regs": {
+"0": "CR1",
+"12": "BRR",
+"16": "GTPR",
+"20": "RTOR",
+"24": "RQR",
+"28": "ISR",
+"32": "ICR",
+"36": "RDR",
+"4": "CR2",
+"40": "TDR",
+"44": "PRESC",
+"8": "CR3"
+}
+},
+"USB_FS_device": {
+"base": 1073765376,
+"irqs": {},
+"regs": {
+"0": "EP0R",
+"12": "EP3R",
+"16": "EP4R",
+"20": "EP5R",
+"24": "EP6R",
+"28": "EP7R",
+"4": "EP1R",
+"64": "CNTR",
+"68": "ISTR",
+"72": "FNR",
+"76": "DADDR",
+"8": "EP2R",
+"80": "BTABLE"
+}
+},
+"VREFBUF": {
+"base": 1073807408,
+"irqs": {},
+"regs": {
+"0": "CSR",
+"4": "CCR"
+}
+},
+"WWDG": {
+"base": 1073753088,
+"irqs": {},
+"regs": {
+"0": "CR",
+"4": "CFR",
+"8": "SR"
+}
+}
+}
+}

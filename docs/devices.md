@@ -1,0 +1,227 @@
+# Devices
+
+What marsemu runs for each device, and what it models around the real firmware.
+
+| Device | Command | Real firmware | Modelled |
+|---|---|---|---|
+| Venus E 3.0 | `venus3 CONTROL BMS` | control, BMS | inverter board, pack |
+| Venus D | `venusd CONTROL BMS` | control, BMS (one per pack) | inverter, MPPT, packs |
+| Venus A | `venusa CONTROL BMS` | control, BMS (one per pack) | inverter with MPPT, packs |
+| Venus C/E | Python only (`VenusCE`) | control, BMS | power stage at the control's pins |
+| Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
+| B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |
+| B2500 v1 (HMB) | `b2500 FIRMWARE` | the one MCU | front end, PV, switched outputs |
+| CT002/CT003, any other image | `run FIRMWARE` | the image | — |
+
+Every whole-device command takes `--load A[,B,C]` (house load per phase),
+`--soc`, `--temp`, `--meter local|HOST:PORT`, `--realtime`, `--state-dir`,
+`--http-port` and `--mqtt broker`; `marsemu COMMAND --help` lists the rest.
+`--serial` runs the BMS in the control's process instead of its own (slower).
+A Venus E 3.0 runs at about 1.5× real time on a 4-core machine; the Venus C/E,
+whose control MCU runs a 30 kHz control loop, at about a sixth.
+
+## Venus E 3.0
+
+```mermaid
+flowchart LR
+    subgraph can ["internal CAN bus, 500 kbit/s"]
+        ctl["control MCU, N32G457<br/>real firmware: FC41D, CT poll,<br/>MQTT, BLE, steering, Modbus"]
+        inv["inverter board model (Python)<br/>Micro v119 CAN protocol, setpoint<br/>clamp, grid-connect delay, slew, losses"]
+        bms["BMS MCU, N32G45x<br/>real firmware: SOC, limits,<br/>protections, MOSFETs"]
+    end
+    afe["KA495XX front-end model"]
+    pack["LFP pack model<br/>16 cells, 100 Ah"]
+    ctl -->|0x1401xx setpoint, config| inv
+    inv -->|0x0n4101xx telemetry| ctl
+    ctl -->|0x1801FFAA poll| bms
+    bms -->|0x18xxAA01 BMS frames| ctl
+    bms -->|SPI| afe --> pack
+```
+
+* **Control** (`venus3` profile, Control 144–151): the real firmware with
+  Wi‑Fi/MQTT/BLE, the CT poll, phase detection, self-consumption steering,
+  schedules and limits. Its settings live in a modelled 24C256 EEPROM.
+* **BMS** (v106–v115) in its own process, measuring the pack through a model of
+  its KA495XX front end; it computes SOC, limits, protections and MOSFET states
+  and answers the control's polls.
+* **Inverter board** (Micro v119, STM32G474): a Python model whose CAN
+  behaviour was taken from Micro v119 running in this emulator; the power stage
+  is modelled (setpoint clamp like `Ctrl_SetPowerReferenceClamped`,
+  grid-connect delay, slew rate, losses, reported-power filter).
+
+```text
+[    39.2] configuring self-consumption mode and CT 112233445566 via marstek_energy/VNSE3-0/App/…/ctrl
+[    50.0] ac   -48.0 W  ref   -48.0 W  grid   648.0 W  soc  50.0% (bms 53.5%)  52.81 V     0.6 A  …
+[    60.0] ac   600.0 W  ref   600.0 W  grid     0.0 W  soc  50.0% (bms 53.5%)  52.63 V   -11.8 A  …
+```
+
+The firmware probes its phase, settles on it and regulates the grid to about
+0 W. A fresh unit is in the 800 W output mode, like a new device;
+`cd=15,vs=2500` (hm2mqtt: rated output power) lifts it.
+
+## Venus D
+
+Control 147–151, BMS 117/118, the inverter model with Micro 116's protocol, and
+a model of the **PV/MPPT controller**, a fourth MCU on the CAN bus whose
+firmware is not available. It answers the control's 0.5 s poll with the block
+the control copies into its MPPT registers and obeys its PV power limit and
+charge voltage; what the control does with the PV power is its own logic.
+
+```bash
+marsemu venusd CONTROL.bin BMS.bin --pv 600[,W,W,W]
+```
+
+```text
+[    60.0] ac   400.0 W  ref   400.0 W  pv  600.0 W  grid     0.0 W  soc  50.3% …  3.1 A
+[   140.0] ac   200.0 W  ref   200.0 W  pv 1500.0 W  grid     0.0 W  soc  50.3% … 23.3 A   ← PV 1500 W, load 200 W
+```
+
+`POST /pv` with `{"pv": [W, W, W, W]}` changes the PV power while it runs.
+
+## Venus A
+
+Control 148–151, BMS 109–115, and a model of the inverter board (Micro 1211, an
+NS800RT that is not emulated) with its four PV inputs. The BMS has an
+**SH36735** front end (13 cells) and a bit-banged I2C EEPROM holding the
+pack's master marker; the inverter has 1450 W limits.
+
+```text
+[    60.0] ac   401.0 W  ref   401.0 W  pv  600.0 W  grid    -1.0 W  soc  50.4% (bms 58.1%)  43.01 V     3.8 A  limits [1450, -1450]
+```
+
+## Stacked packs (Venus D and A)
+
+A Venus D has no battery of its own and runs one or more packs; a Venus A takes
+extra packs too. `--packs N` (or `packs=[LfpPack(...), ...]`) runs one BMS per
+pack, each with its own MCU UID, on the shared CAN bus.
+
+The packs sort out their roles the way real ones do: the first pack becomes
+master and gives the others addresses over the **pack-coding line** (PB12 of
+one BMS drives PB13 of the next through an inverting stage), then runs the
+firmware's pack management (one pack charging at a time, rotation) and reports
+the stack to the control: Modbus 32109 is the pack count, 34000 + 100·k the
+registers of pack k + 1. The DC power is shared by capacity among the packs
+whose MOSFETs are on.
+
+| | D, BMS 118 | A, BMS 115 |
+|---|---|---|
+| packs per stack (firmware limit) | 9 | 6 |
+| master | the first pack (claims at boot) | the pack with the master marker |
+| when the stack is coded | as soon as an uncoded pack announces itself | 2 s after boot |
+
+## Venus C/E
+
+The Venus C and E (HMG-50, control V146–V158) have no inverter MCU: the
+control board's STM32G474 runs the power stage itself, so `VenusCE` models it
+at the control's pins (`plant/venusce.py`): the HRTIM that triggers the 30 kHz
+control loop and drives the inverter bridge and the LLC to the battery, the ADC
+channels with the firmware's scaling, the CORDIC coprocessor, the zero-crossing
+capture and the relays. The BMS (114–216) is real firmware on CAN.
+
+The PLL locks on the emulated grid, the LLC charges the DC bus, the BMS
+reports and grants its permissions, the firmware closes the grid relay, finds
+its phase with its own 2 kW charge or discharge test and covers the house
+(within the 50-70 W its controller leaves on the grid). The plant's
+inductance, bus capacitance and LLC ratio are estimates. It runs at about a
+sixth of real time.
+
+## Jupiter C/E and C Plus
+
+The inverter and MPPT firmware is not available, so they are models built
+from what the control sends and parses (mapped by answering with numbered
+values and reading the device's own `cd=14`/`cd=1` reports). The BMS is a
+model as well, except on the Jupiter C Plus (JPLS-8H), whose BMS firmware
+(V37) runs on a model of its board (the Venus D's KA49503 front end and
+EEPROM, with the master pack address):
+
+```bash
+marsemu jupiter JPLS-8H/143/*.bin JPLS-8H/37/*.bin --pv 300,300 --load 200   # C Plus, real BMS
+marsemu jupiter JPLS-8H/143/*.bin --pv 300,300 --load 200                    # C Plus, BMS model
+```
+
+The C Plus control broadcasts `0x1801FFAA` and the BMS answers with its own
+`0x18nnAA01` frames; the C/E control polls `0x305` and the model answers with
+the Pylontech-style set, which the C Plus also accepts. In `cd=14`,
+`mppt:b_vol,b_cur` (0.1 V, 0.1 A: what the MPPT delivers into the battery) and
+`bms:b_vol,b_cur` (0.01 V, 0.1 A signed: the net battery current) are copied
+unchanged from the MPPT's status block and the BMS's frames. The C Plus BMS
+converts its front end's current reading with fixed constants (180 mV/32768
+per count over a 0.25 mΩ shunt, the same as the Venus D BMS); there is no
+per-unit calibration.
+
+```text
+[    60.0] ac   800.0 W  ref   800.0 W  pv  600.0 W  grid  -400.0 W  …   ← phase detection probe
+[    70.0] ac   395.0 W  ref   395.0 W  pv  600.0 W  grid     5.0 W  soc  50.1% …  3.2 A
+```
+
+The BMS model's limits (50 A, half above 95 % SOC, off when full or at 2.8 V)
+are simple rules, not firmware.
+
+## B2500
+
+One MCU does everything, so the model sits at its pins: an SH367309 battery
+front end on I2C2, two PV inputs (analog converters with PWM references, the
+firmware runs the MPPT), two outputs (current sources referenced by the DAC)
+and a microinverter on each output, modelled as an MPP tracker because the
+firmware shapes the output like a PV panel and lets the inverter find the
+power. Register-level details are in `plant/b2500.py`.
+
+```bash
+marsemu b2500 FIRMWARE.bin --pv 300,300 --load 200
+```
+
+```text
+[   150.0] ac   199.9 W  pv  599.8 W  grid     0.1 W  soc  50.5%  46.35 V     7.8 A  out [104.7, 104.7] W at [35.0, 35.0] V  polls 48
+```
+
+| Builds | Profile | What runs |
+|---|---|---|
+| HMA V222+, HMJ V104+ | `b2500-v3` | everything: MPPT, outputs, CT steering, charging |
+| HMA V119–V220, V241–V255, HMJ V100 | `b2500-v2` | timers and PV charging (these builds have no CT support) |
+| HMB V121–V144 (v1 hardware) | `b2500-v1` | switched outputs and the PV2 pass-through relay |
+
+All of them start from the pack's state of charge: the profiles seed the
+settings record at 0x0803F000 the way the factory does, and the plant keeps
+the SOC there. Which ADC channel carries which signal depends on the build;
+`analysis/b2500.py` finds out from the image.
+
+**Extension packs.** `--extension-packs 1|2` adds emulated extension
+batteries on the UART5 bus. The firmware reports them like real ones
+(connected flags, SOC averaged over all packs, energy summed, each pack's
+voltage, current and temperatures in `cd=26`).
+
+## Supported firmware
+
+`marsemu profiles` lists the board profiles; the right one is detected from the
+image. Application-only OTA images are placed at their link address and
+started the way the bootloader would; full images run the bootloader first.
+
+| Profile | Devices | MCU | FC41D UART | Status |
+|---|---|---|---|---|
+| `b2500-v1` | B2500 v1 (HMB, V121–V144) | N32G452 | USART1 | reaches MQTT; whole device |
+| `b2500-v2` | B2500 v2 old layout (HMA V119–V220, V241–V255; HMJ V100) | N32G452 | USART1 | reaches MQTT; whole device |
+| `b2500-v3` | B2500 v2 new layout (HMA V222+, HMJ V104+) | N32G452 | USART1 | reaches MQTT; whole device (V221.1 and HMJ V101 are bootloader-migration images and wait for an OTA) |
+| `venus` | Venus C/E (HMG) control | STM32G474 | LPUART1 | reaches MQTT (~40 s for V153+, ~80–95 s before); whole device V154 |
+| `venus3` | Venus E 3.0 / A / D control | N32G457 | UART6 | reaches MQTT; whole device |
+| `jupiter` | Jupiter C/E (HMM/HMN), C Plus (JPLS-8H) | N32G45x | USART1 | reaches MQTT; whole device |
+| `ct00x` | CT002/CT003 (HME) | STM32F0-class | USART1 | reaches MQTT (the module claims the factory certificates) |
+| `aux` | BMS and other MCUs without an FC41D (N32) | – | – | boot; the Venus BMSes run fully with their front-end models |
+| `aux-g4` | STM32G474 inverter boards (Venus D/E 3.0 "micro") | – | – | boot; answer the control's CAN commands |
+
+Per-image results are in [`STATUS.md`](STATUS.md), generated by
+`tools/survey.py`.
+
+## What is modelled, and how well
+
+| Part | Source of truth | Confidence |
+|---|---|---|
+| Steering, phase detection, limits, schedules, MQTT/BLE | real control firmware | exact |
+| SOC, current limits, protections, MOSFETs (Venus) | real BMS firmware, measuring the pack model | exact given the cell model |
+| Battery front ends (KA495XX, SH36735, SH367309) | protocols from RE notes and disassembly, scaling measured against the firmware | high |
+| Venus inverter CAN protocols | captured from Micro v119/v116 in the emulator, RE notes | high |
+| Venus D MPPT, Venus A inverter + MPPT, Jupiter inverter/MPPT/BMS (no firmware) | the control firmware's parsers and senders | medium–high |
+| Venus C/E power stage | the control firmware's ADC scaling and PWM mapping; component values estimated | medium |
+| B2500 ADC/PWM/DAC/GPIO mapping, settings record, SOC | disassembly, checked against the firmware's `cd=1` reports | high |
+| Power dynamics (grid-connect delay, slew, filters, losses, converter dynamics) | estimates | **calibrate against a real device** |
+| Microinverter MPP tracking on the B2500 outputs | generic sweep + perturb-and-observe | medium |
+| Cells (LFP OCV curve, resistance, thermal) | generic LFP data | medium |

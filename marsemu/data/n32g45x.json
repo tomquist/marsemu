@@ -1,0 +1,1415 @@
+{
+"device": "N32G457",
+"peripherals": {
+"ADC1": {
+"base": 1073874944,
+"irqs": {
+"ADC1_2": 18
+},
+"regs": {
+"0": "STS",
+"12": "SMPR1",
+"16": "SMPR2",
+"20": "JOFFSET1",
+"24": "JOFFSET2",
+"28": "JOFFSET3",
+"32": "JOFFSET4",
+"36": "WDGHIGH",
+"4": "CTRL1",
+"40": "WDGLOW",
+"44": "RSEQ1",
+"48": "RSEQ2",
+"52": "RSEQ3",
+"56": "JSEQ",
+"60": "JDAT1",
+"64": "JDAT2",
+"68": "JDAT3",
+"72": "JDAT4",
+"76": "JDAT",
+"8": "CTRL2",
+"80": "DIFSEL",
+"84": "CALFACT",
+"88": "CTRL3",
+"92": "SAMPT3",
+"96": "IPTST"
+}
+},
+"ADC2": {
+"base": 1073875968,
+"irqs": {
+"ADC1_2": 18
+},
+"regs": {
+"0": "STS",
+"12": "SMPR1",
+"16": "SMPR2",
+"20": "JOFFSET1",
+"24": "JOFFSET2",
+"28": "JOFFSET3",
+"32": "JOFFSET4",
+"36": "WDGHIGH",
+"4": "CTRL1",
+"40": "WDGLOW",
+"44": "RSEQ1",
+"48": "RSEQ2",
+"52": "RSEQ3",
+"56": "JSEQ",
+"60": "JDAT1",
+"64": "JDAT2",
+"68": "JDAT3",
+"72": "JDAT4",
+"76": "JDAT",
+"8": "CTRL2",
+"80": "DIFSEL",
+"84": "CALFACT",
+"88": "CTRL3",
+"92": "SAMPT3",
+"96": "IPTST"
+}
+},
+"ADC3": {
+"base": 1073879040,
+"irqs": {
+"ADC3_4": 47
+},
+"regs": {
+"0": "STS",
+"12": "SMPR1",
+"16": "SMPR2",
+"20": "JOFFSET1",
+"24": "JOFFSET2",
+"28": "JOFFSET3",
+"32": "JOFFSET4",
+"36": "WDGHIGH",
+"4": "CTRL1",
+"40": "WDGLOW",
+"44": "RSEQ1",
+"48": "RSEQ2",
+"52": "RSEQ3",
+"56": "JSEQ",
+"60": "JDAT1",
+"64": "JDAT2",
+"68": "JDAT3",
+"72": "JDAT4",
+"76": "JDAT",
+"8": "CTRL2",
+"80": "DIFSEL",
+"84": "CALFACT",
+"88": "CTRL3",
+"92": "SAMPT3",
+"96": "IPTST"
+}
+},
+"ADC4": {
+"base": 1073880064,
+"irqs": {
+"ADC3_4": 47
+},
+"regs": {
+"0": "STS",
+"12": "SMPR1",
+"16": "SMPR2",
+"20": "JOFFSET1",
+"24": "JOFFSET2",
+"28": "JOFFSET3",
+"32": "JOFFSET4",
+"36": "WDGHIGH",
+"4": "CTRL1",
+"40": "WDGLOW",
+"44": "RSEQ1",
+"48": "RSEQ2",
+"52": "RSEQ3",
+"56": "JSEQ",
+"60": "JDAT1",
+"64": "JDAT2",
+"68": "JDAT3",
+"72": "JDAT4",
+"76": "JDAT",
+"8": "CTRL2",
+"80": "DIFSEL",
+"84": "CALFACT",
+"88": "CTRL3",
+"92": "SAMPT3",
+"96": "IPTST"
+}
+},
+"AFIO": {
+"base": 1073807360,
+"irqs": {},
+"regs": {
+"0": "ECTRL",
+"12": "EXTI_CFG2",
+"16": "EXTI_CFG3",
+"20": "EXTI_CFG4",
+"32": "RMP_CFG3",
+"36": "RMP_CFG4",
+"4": "RMP_CFG",
+"40": "RMP_CFG5",
+"8": "EXTI_CFG1"
+}
+},
+"BKP": {
+"base": 1073769472,
+"irqs": {},
+"regs": {
+"100": "DAT20",
+"104": "DAT21",
+"108": "DAT22",
+"112": "DAT23",
+"116": "DAT24",
+"12": "DAT3",
+"120": "DAT25",
+"124": "DAT26",
+"128": "DAT27",
+"132": "DAT28",
+"136": "DAT29",
+"140": "DAT30",
+"144": "DAT31",
+"148": "DAT32",
+"152": "DAT33",
+"156": "DAT34",
+"16": "DAT4",
+"160": "DAT35",
+"164": "DAT36",
+"168": "DAT37",
+"172": "DAT38",
+"176": "DAT39",
+"180": "DAT40",
+"184": "DAT41",
+"188": "DAT42",
+"20": "DAT5",
+"24": "DAT6",
+"28": "DAT7",
+"32": "DAT8",
+"36": "DAT9",
+"4": "DAT1",
+"40": "DAT10",
+"48": "CTRL",
+"52": "CSTS",
+"64": "DAT11",
+"68": "DAT12",
+"72": "DAT13",
+"76": "DAT14",
+"8": "DAT2",
+"80": "DAT15",
+"84": "DAT16",
+"88": "DAT17",
+"92": "DAT18",
+"96": "DAT19"
+}
+},
+"CAN1": {
+"base": 1073767424,
+"irqs": {
+"CAN1_RX0": 20,
+"CAN1_RX1": 21,
+"CAN1_SCE": 22,
+"CAN1_TX": 19
+},
+"regs": {
+"0": "MCTRL",
+"12": "RFF0",
+"16": "RFF1",
+"20": "INTE",
+"24": "ESTS",
+"28": "BTIM",
+"384": "TMI0",
+"388": "TMDT0",
+"392": "TMDL0",
+"396": "TMDH0",
+"4": "MSTS",
+"400": "TMI1",
+"404": "TMDT1",
+"408": "TMDL1",
+"412": "TMDH1",
+"416": "TMI2",
+"420": "TMDT2",
+"424": "TMDL2",
+"428": "TMDH2",
+"432": "RMI0",
+"436": "RMDT0",
+"440": "RMDL0",
+"444": "RMDH0",
+"448": "RMI1",
+"452": "RMDT1",
+"456": "RMDL1",
+"460": "RMDH1",
+"512": "FMC",
+"516": "FM1",
+"524": "FS1",
+"532": "FFA1",
+"540": "FA1",
+"576": "F0B1",
+"580": "F0B2",
+"584": "F1B1",
+"588": "F1B2",
+"592": "F2B1",
+"596": "F2B2",
+"600": "F3B1",
+"604": "F3B2",
+"608": "F4B1",
+"612": "F4B2",
+"616": "F5B1",
+"620": "F5B2",
+"624": "F6B1",
+"628": "F6B2",
+"632": "F7B1",
+"636": "F7B2",
+"640": "F8B1",
+"644": "F8B2",
+"648": "F9B1",
+"652": "F9B2",
+"656": "F10B1",
+"660": "F10B2",
+"664": "F11B1",
+"668": "F11B2",
+"672": "F12B1",
+"676": "F12B2",
+"680": "F13B1",
+"684": "F13B2",
+"8": "TSTS"
+}
+},
+"CAN2": {
+"base": 1073768448,
+"irqs": {
+"CAN2_RX0": 64,
+"CAN2_RX1": 65,
+"CAN2_SCE": 66,
+"CAN2_TX": 63
+},
+"regs": {
+"0": "MCTRL",
+"12": "RFF0",
+"16": "RFF1",
+"20": "INTE",
+"24": "ESTS",
+"28": "BTIM",
+"384": "TMI0",
+"388": "TMDT0",
+"392": "TMDL0",
+"396": "TMDH0",
+"4": "MSTS",
+"400": "TMI1",
+"404": "TMDT1",
+"408": "TMDL1",
+"412": "TMDH1",
+"416": "TMI2",
+"420": "TMDT2",
+"424": "TMDL2",
+"428": "TMDH2",
+"432": "RMI0",
+"436": "RMDT0",
+"440": "RMDL0",
+"444": "RMDH0",
+"448": "RMI1",
+"452": "RMDT1",
+"456": "RMDL1",
+"460": "RMDH1",
+"512": "FMC",
+"516": "FM1",
+"524": "FS1",
+"532": "FFA1",
+"540": "FA1",
+"576": "F0B1",
+"580": "F0B2",
+"584": "F1B1",
+"588": "F1B2",
+"592": "F2B1",
+"596": "F2B2",
+"600": "F3B1",
+"604": "F3B2",
+"608": "F4B1",
+"612": "F4B2",
+"616": "F5B1",
+"620": "F5B2",
+"624": "F6B1",
+"628": "F6B2",
+"632": "F7B1",
+"636": "F7B2",
+"640": "F8B1",
+"644": "F8B2",
+"648": "F9B1",
+"652": "F9B2",
+"656": "F10B1",
+"660": "F10B2",
+"664": "F11B1",
+"668": "F11B2",
+"672": "F12B1",
+"676": "F12B2",
+"680": "F13B1",
+"684": "F13B2",
+"8": "TSTS"
+}
+},
+"COMP": {
+"base": 1073751040,
+"irqs": {
+"COMP7": 84,
+"COMP_1_2_3": 82,
+"COMP_4_5_6": 83
+},
+"regs": {
+"100": "FILC",
+"104": "FILP",
+"112": "CTRL",
+"116": "FILC",
+"120": "FILP",
+"128": "WINMODE",
+"132": "LOCK",
+"140": "INTEN",
+"144": "INTSTS",
+"148": "VREFSCL",
+"16": "CTRL",
+"20": "FILC",
+"24": "FILP",
+"32": "CTRL",
+"36": "FILC",
+"40": "FILP",
+"48": "CTRL",
+"52": "FILC",
+"56": "FILP",
+"64": "CTRL",
+"68": "FILC",
+"72": "FILP",
+"80": "CTRL",
+"84": "FILC",
+"88": "FILP",
+"96": "CTRL"
+}
+},
+"CRC": {
+"base": 1073885184,
+"irqs": {},
+"regs": {
+"0": "CRC32DAT",
+"12": "CRC16CTRL",
+"16": "CRC16DAT",
+"20": "CRC16D",
+"24": "LRC",
+"4": "CRC32IDAT",
+"8": "CRC32CTRL"
+}
+},
+"DAC": {
+"base": 1073771520,
+"irqs": {},
+"regs": {
+"0": "CTRL",
+"12": "DL12CH1",
+"16": "DR8CH1",
+"20": "DR12CH2",
+"24": "DL12CH2",
+"28": "DR8CH2",
+"32": "DR12DCH",
+"36": "DL12DCH",
+"4": "SOTTR",
+"40": "DR8DCH",
+"44": "DATO1",
+"48": "DATO2",
+"8": "DR12CH1"
+}
+},
+"DBG": {
+"base": 3758366720,
+"irqs": {},
+"regs": {
+"0": "ID",
+"4": "CTRL"
+}
+},
+"DMA1": {
+"base": 1073872896,
+"irqs": {
+"DMA1_Channel1": 11,
+"DMA1_Channel2": 12,
+"DMA1_Channel3": 13,
+"DMA1_Channel4": 14,
+"DMA1_Channel5": 15,
+"DMA1_Channel6": 16,
+"DMA1_Channel7": 17,
+"DMA1_Channel8": 76
+},
+"regs": {
+"0": "INTSTS",
+"100": "MADDR5",
+"104": "CHSEL5",
+"108": "CHCFG6",
+"112": "TXNUM6",
+"116": "PADDR6",
+"12": "TXNUM1",
+"120": "MADDR6",
+"124": "CHSEL6",
+"128": "CHCFG7",
+"132": "TXNUM7",
+"136": "PADDR7",
+"140": "MADDR7",
+"144": "CHSEL7",
+"148": "CHCFG8",
+"152": "TXNUM8",
+"156": "PADDR8",
+"16": "PADDR1",
+"160": "MADDR8",
+"164": "CHSEL8",
+"168": "CHMAPEN",
+"20": "MADDR1",
+"24": "CHSEL1",
+"28": "CHCFG2",
+"32": "TXNUM2",
+"36": "PADDR2",
+"4": "INTCLR",
+"40": "MADDR2",
+"44": "CHSEL2",
+"48": "CHCFG3",
+"52": "TXNUM3",
+"56": "PADDR3",
+"60": "MADDR3",
+"64": "CHSEL3",
+"68": "CHCFG4",
+"72": "TXNUM4",
+"76": "PADDR4",
+"8": "CHCFG1",
+"80": "MADDR4",
+"84": "CHSEL4",
+"88": "CHCFG5",
+"92": "TXNUM5",
+"96": "PADDR5"
+}
+},
+"DMA2": {
+"base": 1073873920,
+"irqs": {
+"DMA2_Channel1": 56,
+"DMA2_Channel2": 57,
+"DMA2_Channel3": 58,
+"DMA2_Channel4": 59,
+"DMA2_Channel5": 60,
+"DMA2_Channel6": 68,
+"DMA2_Channel7": 69,
+"DMA2_Channel8": 77
+},
+"regs": {
+"0": "INTSTS",
+"100": "MADDR5",
+"104": "CHSEL5",
+"108": "CHCFG6",
+"112": "TXNUM6",
+"116": "PADDR6",
+"12": "TXNUM1",
+"120": "MADDR6",
+"124": "CHSEL6",
+"128": "CHCFG7",
+"132": "TXNUM7",
+"136": "PADDR7",
+"140": "MADDR7",
+"144": "CHSEL7",
+"148": "CHCFG8",
+"152": "TXNUM8",
+"156": "PADDR8",
+"16": "PADDR1",
+"160": "MADDR8",
+"164": "CHSEL8",
+"168": "CHMAPEN",
+"20": "MADDR1",
+"24": "CHSEL1",
+"28": "CHCFG2",
+"32": "TXNUM2",
+"36": "PADDR2",
+"4": "INTCLR",
+"40": "MADDR2",
+"44": "CHSEL2",
+"48": "CHCFG3",
+"52": "TXNUM3",
+"56": "PADDR3",
+"60": "MADDR3",
+"64": "CHSEL3",
+"68": "CHCFG4",
+"72": "TXNUM4",
+"76": "PADDR4",
+"8": "CHCFG1",
+"80": "MADDR4",
+"84": "CHSEL4",
+"88": "CHCFG5",
+"92": "TXNUM5",
+"96": "PADDR5"
+}
+},
+"DVP": {
+"base": 1073826816,
+"irqs": {
+"DVP": 78
+},
+"regs": {
+"0": "CTRL",
+"12": "INTEN",
+"16": "MINTSTS",
+"20": "WST",
+"24": "WSIZE",
+"28": "FIFO",
+"4": "STS",
+"8": "INTSTS"
+}
+},
+"ETH": {
+"base": 1073905664,
+"irqs": {
+"ETH": 61,
+"ETH_WKUP": 62
+},
+"regs": {
+"0": "MACCFG",
+"12": "MACHASHLO",
+"16": "MACMIIADDR",
+"1792": "PTPTSCTRL",
+"1796": "PTPSSINC",
+"1800": "PTPSEC",
+"1804": "PTPNS",
+"1808": "PTPSECUP",
+"1812": "PTPNSUP",
+"1816": "PTPTSADD",
+"1820": "PTPTTSEC",
+"1824": "PTPTTNS",
+"20": "MACMIIDAT",
+"24": "MACFLWCTRL",
+"256": "MMCCTRL",
+"260": "MMCRXINT",
+"264": "MMCTXINT",
+"268": "MMCRXINTMSK",
+"272": "MMCTXINTMSK",
+"28": "MACVLANTAG",
+"332": "MMCTXGFASCCNT",
+"336": "MMCTXGFAMSCCNT",
+"360": "MMCTXGFCNT",
+"4": "MACFFLT",
+"40": "MACRMTWUFRMFLT",
+"404": "MMCRXFCECNT",
+"408": "MMCRXFAECNT",
+"4096": "DMABUSMOD",
+"4100": "DMATXPD",
+"4104": "DMARXPD",
+"4108": "DMARXDLADDR",
+"4112": "DMATXDLADDR",
+"4116": "DMASTS",
+"4120": "DMAOPMOD",
+"4124": "DMAINTEN",
+"4128": "DMAMFBOCNT",
+"4168": "DMACHTXDESC",
+"4172": "DMACHRXDESC",
+"4176": "DMACHTXBADDR",
+"4180": "DMACHRXBADDR",
+"44": "MACPMTCTRLSTS",
+"452": "MMCRXGUFCNT",
+"56": "MACINTSTS",
+"60": "MACINTMSK",
+"64": "MACADDR0HI",
+"68": "MACADDR0LO",
+"72": "MACADDR1HI",
+"76": "MACADDR1LO",
+"8": "MACHASHHI",
+"80": "MACADDR2HI",
+"84": "MACADDR2LO",
+"88": "MACADDR3HI",
+"92": "MACADDR3LO"
+}
+},
+"EXTI": {
+"base": 1073808384,
+"irqs": {
+"EXTI0": 6,
+"EXTI1": 7,
+"EXTI15_10": 40,
+"EXTI2": 8,
+"EXTI3": 9,
+"EXTI4": 10,
+"EXTI9_5": 23
+},
+"regs": {
+"0": "IMASK",
+"12": "FT_CFG",
+"16": "SWIE",
+"20": "PEND",
+"24": "TS_SEL",
+"4": "EMASK",
+"8": "RT_CFG"
+}
+},
+"FLASH": {
+"base": 1073881088,
+"irqs": {
+"FLASH": 4
+},
+"regs": {
+"0": "AC",
+"12": "STS",
+"16": "CTRL",
+"20": "ADD",
+"28": "OB",
+"32": "WRP",
+"36": "ECCR",
+"4": "KEY",
+"44": "RDN",
+"48": "CAHR",
+"8": "OPTKEY"
+}
+},
+"GPIOA": {
+"base": 1073809408,
+"irqs": {},
+"regs": {
+"0": "PL_CFG",
+"12": "POD",
+"16": "PBSC",
+"20": "PBC",
+"24": "PLOCK_CFG",
+"32": "DS_CFG",
+"36": "SR_CFG",
+"4": "PH_CFG",
+"8": "PID"
+}
+},
+"GPIOB": {
+"base": 1073810432,
+"irqs": {},
+"regs": {
+"0": "PL_CFG",
+"12": "POD",
+"16": "PBSC",
+"20": "PBC",
+"24": "PLOCK_CFG",
+"32": "DS_CFG",
+"36": "SR_CFG",
+"4": "PH_CFG",
+"8": "PID"
+}
+},
+"GPIOC": {
+"base": 1073811456,
+"irqs": {},
+"regs": {
+"0": "PL_CFG",
+"12": "POD",
+"16": "PBSC",
+"20": "PBC",
+"24": "PLOCK_CFG",
+"32": "DS_CFG",
+"36": "SR_CFG",
+"4": "PH_CFG",
+"8": "PID"
+}
+},
+"GPIOD": {
+"base": 1073812480,
+"irqs": {},
+"regs": {
+"0": "PL_CFG",
+"12": "POD",
+"16": "PBSC",
+"20": "PBC",
+"24": "PLOCK_CFG",
+"32": "DS_CFG",
+"36": "SR_CFG",
+"4": "PH_CFG",
+"8": "PID"
+}
+},
+"GPIOE": {
+"base": 1073813504,
+"irqs": {},
+"regs": {
+"0": "PL_CFG",
+"12": "POD",
+"16": "PBSC",
+"20": "PBC",
+"24": "PLOCK_CFG",
+"32": "DS_CFG",
+"36": "SR_CFG",
+"4": "PH_CFG",
+"8": "PID"
+}
+},
+"GPIOF": {
+"base": 1073814528,
+"irqs": {},
+"regs": {
+"0": "PL_CFG",
+"12": "POD",
+"16": "PBSC",
+"20": "PBC",
+"24": "PLOCK_CFG",
+"32": "DS_CFG",
+"36": "SR_CFG",
+"4": "PH_CFG",
+"8": "PID"
+}
+},
+"GPIOG": {
+"base": 1073815552,
+"irqs": {},
+"regs": {
+"0": "PL_CFG",
+"12": "POD",
+"16": "PBSC",
+"20": "PBC",
+"24": "PLOCK_CFG",
+"32": "DS_CFG",
+"36": "SR_CFG",
+"4": "PH_CFG",
+"8": "PID"
+}
+},
+"I2C1": {
+"base": 1073763328,
+"irqs": {
+"I2C1_ER": 32,
+"I2C1_EV": 31
+},
+"regs": {
+"0": "CTRL1",
+"12": "OADDR2",
+"16": "DAT",
+"20": "STS1",
+"24": "STS2",
+"28": "CLKCTRL",
+"32": "TMRISE",
+"4": "CTRL2",
+"8": "OADDR1"
+}
+},
+"I2C2": {
+"base": 1073764352,
+"irqs": {
+"I2C2_ER": 34,
+"I2C2_EV": 33
+},
+"regs": {
+"0": "CTRL1",
+"12": "OADDR2",
+"16": "DAT",
+"20": "STS1",
+"24": "STS2",
+"28": "CLKCTRL",
+"32": "TMRISE",
+"4": "CTRL2",
+"8": "OADDR1"
+}
+},
+"I2C3": {
+"base": 1073824768,
+"irqs": {
+"I2C3_ER": 71,
+"I2C3_EV": 70
+},
+"regs": {
+"0": "CTRL1",
+"12": "OADDR2",
+"16": "DAT",
+"20": "STS1",
+"24": "STS2",
+"28": "CLKCTRL",
+"32": "TMRISE",
+"4": "CTRL2",
+"8": "OADDR1"
+}
+},
+"I2C4": {
+"base": 1073825792,
+"irqs": {
+"I2C4_ER": 73,
+"I2C4_EV": 72
+},
+"regs": {
+"0": "CTRL1",
+"12": "OADDR2",
+"16": "DAT",
+"20": "STS1",
+"24": "STS2",
+"28": "CLKCTRL",
+"32": "TMRISE",
+"4": "CTRL2",
+"8": "OADDR1"
+}
+},
+"IWDG": {
+"base": 1073754112,
+"irqs": {},
+"regs": {
+"0": "KEY",
+"12": "STS",
+"4": "PREDIV",
+"8": "RELV"
+}
+},
+"OPAMP": {
+"base": 1073750016,
+"irqs": {},
+"regs": {
+"0": "CS1",
+"16": "CS2",
+"32": "CS3",
+"48": "CS4",
+"64": "LOCK"
+}
+},
+"PWR": {
+"base": 1073770496,
+"irqs": {
+"PVD": 1
+},
+"regs": {
+"0": "CTRL1",
+"12": "CTRL3",
+"4": "CTRLSTS",
+"8": "CTRL2"
+}
+},
+"QSPI": {
+"base": 2684358656,
+"irqs": {
+"QSPI": 67
+},
+"regs": {
+"0": "CTRL0",
+"12": "MW_CTRL",
+"16": "SLAVE_EN",
+"20": "BAUD",
+"24": "TXFT",
+"240": "RS_DELAY",
+"244": "ENH_CTRL0",
+"248": "DDR_TXDE",
+"252": "MODE",
+"256": "INCR_TOC",
+"260": "WRAP_TOC",
+"264": "CTRL",
+"268": "SLAVE_EN",
+"272": "RXFOI_CLR",
+"276": "TOUT",
+"28": "RXFT",
+"32": "TXFN",
+"36": "RXFN",
+"4": "CTRL1",
+"40": "STS",
+"44": "IMASK",
+"48": "ISTS",
+"52": "RISTS",
+"56": "TXFOI_CLR",
+"60": "RXFOI_CLR",
+"64": "RXFUI_CLR",
+"68": "MMCI_CLR",
+"72": "ICLR",
+"76": "DMA_CTRL",
+"8": "EN",
+"80": "DMATDL_CTRL",
+"84": "DMARDL_CTRL",
+"96": "DATx"
+}
+},
+"RCC": {
+"base": 1073876992,
+"irqs": {
+"RCC": 5
+},
+"regs": {
+"0": "CTRL",
+"12": "APB2PRST",
+"16": "APB1PRST",
+"20": "AHBPCLKEN",
+"24": "APB2PCLKEN",
+"28": "APB1PCLKEN",
+"32": "BDCTRL",
+"36": "CTRLSTS",
+"4": "CFG",
+"40": "AHBPRST",
+"44": "CFG2",
+"48": "CFG3",
+"8": "CLKINT"
+}
+},
+"RTC": {
+"base": 1073752064,
+"irqs": {
+"RTC": 3,
+"RTCAlarm": 41
+},
+"regs": {
+"0": "TSH",
+"100": "TSCWKUPCTRL",
+"104": "TSCWKUPCNT",
+"12": "INITSTS",
+"16": "PRE",
+"20": "WKUPT",
+"28": "ALARMA",
+"32": "ALARMB",
+"36": "WRP",
+"4": "DATE",
+"40": "SUBS",
+"44": "SCTRL",
+"48": "TST",
+"52": "TSD",
+"56": "TSSS",
+"60": "CALIB",
+"68": "ALRMASS",
+"72": "ALRMBSS",
+"76": "OPT",
+"8": "CTRL"
+}
+},
+"SDIO": {
+"base": 1073840128,
+"irqs": {
+"SDIO": 49
+},
+"regs": {
+"0": "PWRCTRL",
+"12": "CMDCTRL",
+"128": "DATFIFO",
+"16": "CMDRESP",
+"20": "RESP1",
+"24": "RESP2",
+"28": "RESP3",
+"32": "RESP4",
+"36": "DATTIMEOUT",
+"4": "CLKCTRL",
+"40": "DATLEN",
+"44": "DATCTRL",
+"48": "DATCOUNT",
+"52": "STS",
+"56": "INTCLR",
+"60": "INTEN",
+"72": "FIFOCOUNT",
+"8": "CMDARG"
+}
+},
+"SPI1": {
+"base": 1073819648,
+"irqs": {
+"SPI1": 35
+},
+"regs": {
+"0": "CTRL1",
+"12": "DAT",
+"16": "CRCPOLY",
+"20": "CRCRDAT",
+"24": "CRCTDAT",
+"28": "I2SCFG",
+"32": "I2SPREDIV",
+"4": "CTRL2",
+"8": "STS"
+}
+},
+"SPI2": {
+"base": 1073756160,
+"irqs": {
+"SPI2": 36
+},
+"regs": {
+"0": "CTRL1",
+"12": "DAT",
+"16": "CRCPOLY",
+"20": "CRCRDAT",
+"24": "CRCTDAT",
+"28": "I2SCFG",
+"32": "I2SPREDIV",
+"4": "CTRL2",
+"8": "STS"
+}
+},
+"SPI3": {
+"base": 1073757184,
+"irqs": {
+"SPI3": 51
+},
+"regs": {
+"0": "CTRL1",
+"12": "DAT",
+"16": "CRCPOLY",
+"20": "CRCRDAT",
+"24": "CRCTDAT",
+"28": "I2SCFG",
+"32": "I2SPREDIV",
+"4": "CTRL2",
+"8": "STS"
+}
+},
+"TIM1": {
+"base": 1073818624,
+"irqs": {
+"TIM1_BRK": 24,
+"TIM1_CC": 27,
+"TIM1_TRG_COM": 26,
+"TIM1_UP": 25
+},
+"regs": {
+"0": "CTRL1",
+"12": "DINTEN",
+"16": "STS",
+"20": "EVTGEN",
+"24": "CCMOD1",
+"28": "CCMOD2",
+"32": "CCEN",
+"36": "CNT",
+"4": "CTRL2",
+"40": "PSC",
+"44": "AR",
+"48": "REPCNT",
+"52": "CCDAT1",
+"56": "CCDAT2",
+"60": "CCDAT3",
+"64": "CCDAT4",
+"68": "BKDT",
+"72": "DCTRL",
+"76": "DADDR",
+"8": "SMCTRL",
+"84": "CCMOD3",
+"88": "CCDAT5",
+"92": "CCDAT6"
+}
+},
+"TIM2": {
+"base": 1073741824,
+"irqs": {
+"TIM2": 28
+},
+"regs": {
+"0": "CTRL1",
+"12": "DINTEN",
+"16": "STS",
+"20": "EVTGEN",
+"24": "CCMOD1",
+"28": "CCMOD2",
+"32": "CCEN",
+"36": "CNT",
+"4": "CTRL2",
+"40": "PSC",
+"44": "AR",
+"52": "CCDAT1",
+"56": "CCDAT2",
+"60": "CCDAT3",
+"64": "CCDAT4",
+"72": "DCTRL",
+"76": "DADDR",
+"8": "SMCTRL"
+}
+},
+"TIM3": {
+"base": 1073742848,
+"irqs": {
+"TIM3": 29
+},
+"regs": {
+"0": "CTRL1",
+"12": "DINTEN",
+"16": "STS",
+"20": "EVTGEN",
+"24": "CCMOD1",
+"28": "CCMOD2",
+"32": "CCEN",
+"36": "CNT",
+"4": "CTRL2",
+"40": "PSC",
+"44": "AR",
+"52": "CCDAT1",
+"56": "CCDAT2",
+"60": "CCDAT3",
+"64": "CCDAT4",
+"72": "DCTRL",
+"76": "DADDR",
+"8": "SMCTRL"
+}
+},
+"TIM4": {
+"base": 1073743872,
+"irqs": {
+"TIM4": 30
+},
+"regs": {
+"0": "CTRL1",
+"12": "DINTEN",
+"16": "STS",
+"20": "EVTGEN",
+"24": "CCMOD1",
+"28": "CCMOD2",
+"32": "CCEN",
+"36": "CNT",
+"4": "CTRL2",
+"40": "PSC",
+"44": "AR",
+"52": "CCDAT1",
+"56": "CCDAT2",
+"60": "CCDAT3",
+"64": "CCDAT4",
+"72": "DCTRL",
+"76": "DADDR",
+"8": "SMCTRL"
+}
+},
+"TIM5": {
+"base": 1073744896,
+"irqs": {
+"TIM5": 50
+},
+"regs": {
+"0": "CTRL1",
+"12": "DINTEN",
+"16": "STS",
+"20": "EVTGEN",
+"24": "CCMOD1",
+"28": "CCMOD2",
+"32": "CCEN",
+"36": "CNT",
+"4": "CTRL2",
+"40": "PSC",
+"44": "AR",
+"52": "CCDAT1",
+"56": "CCDAT2",
+"60": "CCDAT3",
+"64": "CCDAT4",
+"72": "DCTRL",
+"76": "DADDR",
+"8": "SMCTRL"
+}
+},
+"TIM6": {
+"base": 1073745920,
+"irqs": {
+"TIM6": 54
+},
+"regs": {
+"0": "CTRL1",
+"12": "DINTEN",
+"16": "STS",
+"20": "EVTGEN",
+"36": "CNT",
+"4": "CTRL2",
+"40": "PSC",
+"44": "AR"
+}
+},
+"TIM7": {
+"base": 1073746944,
+"irqs": {
+"TIM7": 55
+},
+"regs": {
+"0": "CTRL1",
+"12": "DINTEN",
+"16": "STS",
+"20": "EVTGEN",
+"36": "CNT",
+"4": "CTRL2",
+"40": "PSC",
+"44": "AR"
+}
+},
+"TIM8": {
+"base": 1073820672,
+"irqs": {
+"TIM8_BRK": 43,
+"TIM8_CC": 46,
+"TIM8_TRG_COM": 45,
+"TIM8_UP": 44
+},
+"regs": {
+"0": "CTRL1",
+"12": "DINTEN",
+"16": "STS",
+"20": "EVTGEN",
+"24": "CCMOD1",
+"28": "CCMOD2",
+"32": "CCEN",
+"36": "CNT",
+"4": "CTRL2",
+"40": "PSC",
+"44": "AR",
+"48": "REPCNT",
+"52": "CCDAT1",
+"56": "CCDAT2",
+"60": "CCDAT3",
+"64": "CCDAT4",
+"68": "BKDT",
+"72": "DCTRL",
+"76": "DADDR",
+"8": "SMCTRL",
+"84": "CCMOD3",
+"88": "CCDAT5",
+"92": "CCDAT6"
+}
+},
+"TSC": {
+"base": 1073755136,
+"irqs": {
+"TSC": 81
+},
+"regs": {
+"0": "CTRL",
+"100": "THRHD16",
+"104": "THRHD17",
+"108": "THRHD18",
+"112": "THRHD19",
+"116": "THRHD20",
+"120": "THRHD21",
+"124": "THRHD22",
+"128": "THRHD23",
+"16": "ANA_CTRL",
+"20": "ANA_SEL",
+"24": "RESR0",
+"28": "RESR1",
+"32": "RESR2",
+"36": "THRHD0",
+"4": "CHNEN",
+"40": "THRHD1",
+"44": "THRHD2",
+"48": "THRHD3",
+"52": "THRHD4",
+"56": "THRHD5",
+"60": "THRHD6",
+"64": "THRHD7",
+"68": "THRHD8",
+"72": "THRHD9",
+"76": "THRHD10",
+"8": "STS",
+"80": "THRHD11",
+"84": "THRHD12",
+"88": "THRHD13",
+"92": "THRHD14",
+"96": "THRHD15"
+}
+},
+"UART4": {
+"base": 1073761280,
+"irqs": {
+"UART4": 52
+},
+"regs": {
+"0": "STS",
+"12": "CTRL1",
+"16": "CTRL2",
+"20": "CTRL3",
+"24": "GTP",
+"4": "DAT",
+"8": "BRCF"
+}
+},
+"UART5": {
+"base": 1073762304,
+"irqs": {
+"UART5": 53
+},
+"regs": {
+"0": "STS",
+"12": "CTRL1",
+"16": "CTRL2",
+"20": "CTRL3",
+"24": "GTP",
+"4": "DAT",
+"8": "BRCF"
+}
+},
+"UART6": {
+"base": 1073827840,
+"irqs": {
+"UART6": 74
+},
+"regs": {
+"0": "STS",
+"12": "CTRL1",
+"16": "CTRL2",
+"20": "CTRL3",
+"24": "GTP",
+"4": "DAT",
+"8": "BRCF"
+}
+},
+"UART7": {
+"base": 1073828864,
+"irqs": {
+"UART7": 75
+},
+"regs": {
+"0": "STS",
+"12": "CTRL1",
+"16": "CTRL2",
+"20": "CTRL3",
+"24": "GTP",
+"4": "DAT",
+"8": "BRCF"
+}
+},
+"USART1": {
+"base": 1073821696,
+"irqs": {
+"USART1": 37
+},
+"regs": {
+"0": "STS",
+"12": "CTRL1",
+"16": "CTRL2",
+"20": "CTRL3",
+"24": "GTP",
+"4": "DAT",
+"8": "BRCF"
+}
+},
+"USART2": {
+"base": 1073759232,
+"irqs": {
+"USART2": 38
+},
+"regs": {
+"0": "STS",
+"12": "CTRL1",
+"16": "CTRL2",
+"20": "CTRL3",
+"24": "GTP",
+"4": "DAT",
+"8": "BRCF"
+}
+},
+"USART3": {
+"base": 1073760256,
+"irqs": {
+"USART3": 39
+},
+"regs": {
+"0": "STS",
+"12": "CTRL1",
+"16": "CTRL2",
+"20": "CTRL3",
+"24": "GTP",
+"4": "DAT",
+"8": "BRCF"
+}
+},
+"USB": {
+"base": 1073765376,
+"irqs": {
+"USBWakeUp": 42
+},
+"regs": {
+"0": "EP0",
+"12": "EP3",
+"16": "EP4",
+"20": "EP5",
+"24": "EP6",
+"28": "EP7",
+"4": "EP1",
+"64": "CTRL",
+"68": "STS",
+"72": "FN",
+"76": "ADDR",
+"8": "EP2",
+"80": "BUFTAB"
+}
+},
+"WWDG": {
+"base": 1073753088,
+"irqs": {
+"WWDG": 0
+},
+"regs": {
+"0": "CTRL",
+"4": "CFG",
+"8": "STS"
+}
+}
+}
+}
