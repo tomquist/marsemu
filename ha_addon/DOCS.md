@@ -21,7 +21,10 @@ the other devices follow.
 
 - **Firmware image**: the file to start. Empty: the only supported image in
   the folder, or pick one in the panel.
-- **MQTT**: `home_assistant` (needs the Mosquitto broker add-on) or `offline`.
+- **MQTT**: `home_assistant` (needs the Mosquitto broker add-on), `custom` (a
+  broker of your own: set **Broker address**, **Broker port** and, if it needs
+  them, **Broker user** and **Broker password**; plain MQTT, no TLS), or
+  `offline`.
 - **House load sensor**: a power sensor with your household consumption. The
   emulated house then follows it, so you can see what the battery would do in
   your house.

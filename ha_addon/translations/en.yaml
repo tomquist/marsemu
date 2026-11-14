@@ -4,7 +4,19 @@ configuration:
     description: File name of the image to start. Empty starts the only supported image in the firmware folder, or waits for you to pick one in the dashboard.
   mqtt:
     name: MQTT
-    description: home_assistant connects the emulated device to Home Assistant's MQTT broker, where hm2mqtt finds it. offline keeps its MQTT traffic inside the add-on.
+    description: home_assistant connects the emulated device to Home Assistant's MQTT broker (the Mosquitto add-on), custom to the broker below, offline keeps its MQTT traffic inside the add-on.
+  mqtt_host:
+    name: Broker address
+    description: Host name or IP address of your MQTT broker, for MQTT custom.
+  mqtt_port:
+    name: Broker port
+    description: Port of your MQTT broker (plain MQTT, usually 1883).
+  mqtt_user:
+    name: Broker user
+    description: User name, if your broker needs one.
+  mqtt_password:
+    name: Broker password
+    description: Password, if your broker needs one.
   house_load_entity:
     name: House load sensor
     description: A power sensor (W or kW) with your household consumption. The emulated house then draws what your house draws.

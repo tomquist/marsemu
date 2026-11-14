@@ -1,5 +1,5 @@
 name: marsemu
-version: "0.1.0"
+version: "0.1.1"
 slug: marsemu
 description: An emulated Marstek battery running its own firmware, with an X-ray dashboard
 url: https://github.com/tomquist/marsemu
@@ -21,6 +21,10 @@ map:
 options:
   image: ""
   mqtt: home_assistant
+  mqtt_host: ""
+  mqtt_port: 1883
+  mqtt_user: ""
+  mqtt_password: ""
   house_load_entity: ""
   load_w: 400
   pv1_w: 300
@@ -31,7 +35,11 @@ options:
   meter: local
 schema:
   image: str?
-  mqtt: list(home_assistant|offline)
+  mqtt: list(home_assistant|custom|offline)
+  mqtt_host: str?
+  mqtt_port: port
+  mqtt_user: str?
+  mqtt_password: password?
   house_load_entity: str?
   load_w: int(0,10000)
   pv1_w: int(0,1000)

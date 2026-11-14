@@ -68,8 +68,9 @@ docker run --rm -p 8080:8080 -v "$PWD/firmware:/firmware" ghcr.io/tomquist/marse
 3. Drop your device's firmware image into the panel, or copy it into
    `/addon_configs/<id>_marsemu/firmware`.
 
-With the Mosquitto broker add-on installed, the emulated battery connects to
-Home Assistant's broker with its real topics, so hm2mqtt sees it like a real
+With the Mosquitto broker add-on installed, or with MQTT set to `custom` and
+your own broker's address, the emulated battery connects to that broker with
+its real topics, so hm2mqtt sees it like a real
 device. Set **House load sensor** to your household consumption sensor, and
 the emulated house draws what your house draws. The add-on's documentation
 tab describes every option.

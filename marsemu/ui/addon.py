@@ -34,6 +34,13 @@ def supervisor(path: str) -> Optional[dict]:
     try:
         with urllib.request.urlopen(r, timeout=10) as resp:
             body = json.loads(resp.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            msg = json.loads(exc.read() or b"{}").get("message") or exc.reason
+        except (ValueError, AttributeError):
+            msg = exc.reason
+        log.warning("Supervisor %s: %s %s", path, exc.code, msg)
+        return None
     except (urllib.error.URLError, OSError, ValueError) as exc:
         log.warning("Supervisor %s: %s", path, exc)
         return None
@@ -41,13 +48,26 @@ def supervisor(path: str) -> Optional[dict]:
 
 
 def mqtt_network(opts: dict):
-    """A factory for the devices' network: Home Assistant's broker, or offline."""
-    if opts.get("mqtt", "home_assistant") != "home_assistant":
+    """A factory for the devices' network: Home Assistant's broker, a broker of
+    your own (``mqtt: custom`` with ``mqtt_host`` etc.), or offline."""
+    mode = opts.get("mqtt", "home_assistant")
+    if mode == "custom":
+        host = (opts.get("mqtt_host") or "").strip()
+        if not host:
+            log.warning("MQTT: custom broker chosen but no mqtt_host set; running offline")
+            return lambda: Network()
+        port = int(opts.get("mqtt_port") or 1883)
+        user = opts.get("mqtt_user") or ""
+        auth = (user, opts.get("mqtt_password") or "") if user else None
+        log.info("MQTT: %s:%s%s", host, port, f" as {user}" if user else "")
+        return lambda: Network(mqtt="broker", broker=(host, port), broker_auth=auth)
+    if mode != "home_assistant":
         log.info("MQTT: offline (the device's MQTT traffic is shown, not sent)")
         return lambda: Network()
     svc = supervisor("/services/mqtt") or {}
     if not svc.get("host"):
-        log.warning("MQTT: Home Assistant has no MQTT service (install the Mosquitto broker add-on); running offline")
+        log.warning("MQTT: Home Assistant offers no MQTT broker (the Mosquitto broker add-on does; "
+                    "or set mqtt to custom with your broker's address); running offline")
         return lambda: Network()
     host, port = svc["host"], int(svc.get("port", 1883))
     auth = (svc["username"], svc.get("password", "")) if svc.get("username") else None
