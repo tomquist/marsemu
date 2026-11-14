@@ -95,7 +95,7 @@ const OUTSIDE = {
 function clearLayout() {
   for (const g of [tracksG, flowsG, senseG, compsG, cellsG, capsG, silG, boardsDecor]) g.replaceChildren();
   for (const o of [P, V, SIL]) for (const k of Object.keys(o)) delete o[k];
-  CELL.length = 0; cellSil.length = 0;
+  CELL.length = 0; cellSil.length = 0; FITS.length = 0;
   if (typeof caps !== "undefined") caps.length = 0;
 }
 function drawPaths() {
@@ -125,7 +125,29 @@ function comp(key) {
 }
 function valText(key, dx, dy, cls = "val", anchor = "start") {
   const c = COMP[key];
-  return el("text", { class: cls, x: c.x + dx, y: c.y + dy, "text-anchor": anchor }, $("m-" + key));
+  const t = el("text", { class: cls, x: c.x + dx, y: c.y + dy, "text-anchor": anchor }, $("m-" + key));
+  FITS.push({ t, max: anchor === "start" ? c.w - dx - 6 : c.w - 12, src: null, out: null });
+  return t;
+}
+// keep every value inside its box: a little too long is squeezed, much too long is cut with "…"
+const FITS = [];
+function fitTexts() {
+  for (const f of FITS) {
+    const t = f.t, txt = t.textContent;
+    if (txt === f.out) continue;                                  // already fitted
+    if (txt === f.src && f.out != null) { t.textContent = f.out; continue; }
+    f.src = txt; f.out = txt;
+    t.removeAttribute("textLength"); t.removeAttribute("lengthAdjust");
+    if (!t.isConnected || !txt) continue;
+    let w = t.getComputedTextLength();
+    if (w <= f.max) continue;
+    if (w > f.max / 0.82) {                                       // squeezing alone would be unreadable
+      let n = txt.length;
+      while (n > 3 && w > f.max / 0.82) { n--; t.textContent = txt.slice(0, n).trimEnd() + "…"; w = t.getComputedTextLength(); }
+      f.out = t.textContent;
+    }
+    if (w > f.max) { t.setAttribute("textLength", f.max); t.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+  }
 }
 function chip(key, title) {
   // a die in the middle of a big part, with pins around it
@@ -1673,7 +1695,7 @@ function frame(now) {
     const dt = clamp((now - last) / 1000, 0, 0.1); last = now;
     animFlows(dt);
     animCaps(now);
-    if (SN) render();
+    if (SN) { render(); fitTexts(); }
     if (!reduced && SN) $("beam").setAttribute("x", (170 + ((now / 7000) % 1) * 820).toFixed(1));
     if (now - slowT > 250) { slowT = now; renderHud(); syncSliders(); inspector(); renderLog(); drawCharts(); }
     else if (hoverX != null) drawCharts();
