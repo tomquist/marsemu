@@ -57,6 +57,9 @@ class DeviceSession:
     MODEL = "?"
     #: console channels this device has, in display order
     CHANNELS = ("FW", "MQTT", "RF", "BLE", "EVT", "ALARM")
+    #: a battery in a house (False: the CT meter)
+    HAS_PACK = True
+    HAS_HOUSE = True
     SLICE_S = 0.25
     HIST_PERIOD_S = 0.5
     HIST_LEN = 600
@@ -108,10 +111,10 @@ class DeviceSession:
                 device_type = None
         self.device_type = device_type
         self.house = House({"A": float(load)})
-        self.meter = connect_house(self.dev, self.house, meter, self.ct_mac)
+        self.meter = connect_house(self.dev, self.house, meter, self.ct_mac) if self.HAS_HOUSE else None
         self._hook_module()
         self._hook_device()
-        if setup:
+        if setup and self.HAS_HOUSE:
             configure_self_consumption(self.dev, self.ct_mac, say=lambda text: self._log("FW", "", text))
         self.dev.sim.every(self.HIST_PERIOD_S, self._sample_history)
         if getattr(self.emu.fc41d.net, "mqtt_mode", "offline") == "offline":
@@ -143,7 +146,7 @@ class DeviceSession:
 
     @property
     def pack(self):
-        return self.dev.pack
+        return getattr(self.dev, "pack", None)
 
     @property
     def fc41d_uart(self) -> str:
@@ -198,8 +201,17 @@ class DeviceSession:
         e.on("ble_notify", lambda data, *a: self._log("BLE", "FC41D→phone",
                                                        "notify " + (data.hex() if isinstance(data, (bytes, bytearray)) else str(data))[:120]))
 
+        if self.HAS_HOUSE:
+            self._hook_meter(mod.net)
+
+        # faults that need the emulator's own time
+        def heat(now, dt) -> None:
+            if self.faults["heat"] and self.pack is not None:
+                self.pack.temp_c = min(75.0, self.pack.temp_c + 4.0 * dt)
+        self.dev.sim.tickers.append(heat)
+
+    def _hook_meter(self, net) -> None:
         # the CT002: polls in, answers out; the fault drops them
-        net = mod.net
         meter = net.udp_handler
 
         def udp(sock, data: bytes, dest) -> None:
@@ -220,12 +232,6 @@ class DeviceSession:
                 orig_answer(sock, f, dest)
             self.meter._answer = answer
 
-        # faults that need the emulator's own time
-        def heat(now, dt) -> None:
-            if self.faults["heat"]:
-                self.pack.temp_c = min(75.0, self.pack.temp_c + 4.0 * dt)
-        self.dev.sim.tickers.append(heat)
-
     def _app_poll(self, now: float) -> None:
         if self.sub_topic and not self.faults["wifi"]:
             self._log("MQTT", "broker→FC41D", f"{self.sub_topic}  cd=1  (status poll, as the app does)")
@@ -233,9 +239,14 @@ class DeviceSession:
 
     def _battery_w(self) -> float:
         p = self.pack
-        return p.current_a * p.voltage
+        return p.current_a * p.voltage if p is not None else 0.0
 
     def _sample_history(self, now: float) -> None:
+        if not self.HAS_PACK:
+            sample = {"t": round(now, 2), **self._sample()}
+            with self.lock:
+                self.history.append(sample)
+            return
         cells = self.pack.cell_voltages
         sample = {
             "t": round(now, 2), "grid": round(self.house.grid()["A"], 1), "ac": round(self.dev.ac_power, 1),
@@ -388,7 +399,8 @@ class DeviceSession:
             span = now - self._irq_t
             self._irq_rates = {i: (c - p) / span for i, (c, p) in enumerate(zip(cur, self._irq_prev)) if c > p}
             self._irq_prev, self._irq_t = cur, now
-        names = _irq_names()
+        names = {16 + n: name for n, name in getattr(nv, "irq_names", {}).items()} or _irq_names()
+        names.update({11: "SVC", 14: "PendSV", 15: "SysTick"})
         top = sorted(self._irq_rates.items(), key=lambda kv: -kv[1])[:8]
         return [[names.get(i, f"exc {i}"), round(r, 1)] for i, r in top]
 
@@ -408,10 +420,11 @@ class DeviceSession:
             "device_type": self.emu.device_type or self.device_type, "version": self.version,
             "load": round(self.house.loads["A"], 1), "grid": round(self.house.grid()["A"], 1),
             "ac": round(d.ac_power, 1), "ambient": self.ambient_c,
-            "pack": {"soc": round(p.soc * 100, 2), "v": round(p.voltage, 3), "a": round(p.current_a, 3),
-                     "w": round(self._battery_w(), 1), "temp": round(p.temp_c, 1),
-                     "cells": [round(v * 1000, 1) for v in p.cell_voltages],
-                     "capacity_ah": p.capacity_ah, "ah_in": round(p.charged_ah, 3), "ah_out": round(p.discharged_ah, 3)},
+            "pack": None if p is None else {
+                "soc": round(p.soc * 100, 2), "v": round(p.voltage, 3), "a": round(p.current_a, 3),
+                "w": round(self._battery_w(), 1), "temp": round(p.temp_c, 1),
+                "cells": [round(v * 1000, 1) for v in p.cell_voltages],
+                "capacity_ah": p.capacity_ah, "ah_in": round(p.charged_ah, 3), "ah_out": round(p.discharged_ah, 3)},
             "mcu": {"pc": pc, "cycles": m.clock.cycles, "hz": m.clock.hz, "irqs": self._irqs()},
             "fc41d": {"wifi": bool(mod.wifi_up), "ble": mod.ble_name, "version": mod.cfg.version, "uart": self.fc41d_uart,
                       "mqtt": [{"host": s.host, "port": s.port, "connected": s.connected, "client_id": s.client_id,
@@ -546,18 +559,41 @@ class B2500Session(DeviceSession):
         }
 
 
-# =========================================================================== Venus E 3.0
-#: what the control asks of the inverter board, by function code (see VenusMicro._command)
+# ======================================================================= CAN decoding
+#: what the control asks of an inverter board, by function code (see VenusMicro._command)
 MICRO_FUNCS = {0x01: "setpoint", 0x02: "backup flag", 0x03: "discharge limit", 0x04: "charge limit",
                0x05: "save statistics", 0x06: "standby", 0x07: "EMS sequence", 0x08: "parallel mode",
                0x0A: "cut-off SOC", 0x10: "telemetry", 0x11: "configuration", 0x12: "status", 0x13: "limits",
                0x14: "limits and SOC", 0x50: "stop", 0x57: "backup mode", 0x58: "setpoint (mode 1)",
                0xC1: "self-test", 0xC2: "clear", 0xCB: "version"}
+MPPT_FUNCS = {0x01: "PV limit", 0x02: "charge voltage", 0x03: "status block", 0xCB: "version"}
+#: CAN node addresses of the boards marsemu models: Venus inverter, Jupiter inverter, MPPT
+NODES = {0x41: "inverter", 0x11: "inverter", 0x21: "MPPT"}
+#: Pylontech-style frames of the Jupiter C/E's BMS
+PYLON = {0x351: "limits", 0x355: "SOC", 0x356: "pack", 0x359: "protection", 0x35C: "flags", 0x35E: "name"}
 
 
-def decode_venus_can(ident: int, data: bytes, sender: str) -> tuple:
-    """(direction, short label, text) for a frame on the Venus E 3.0 internal CAN bus."""
+def decode_venus_can(ident: int, data: bytes, sender: str, ext: bool = True) -> tuple:
+    """(direction, short label, text) for a frame on a Venus or Jupiter internal CAN bus."""
     d = data + bytes(8)
+    if not ext:
+        if ident == 0x305:
+            return "control→BMS", "BMS poll", "0x305  BMS request"
+        if ident == 0x351:
+            cv, ci, di = struct.unpack_from("<HHH", d)
+            text = f"limits: charge to {cv / 10:.1f} V at {ci / 10:.1f} A, discharge {di / 10:.1f} A"
+        elif ident == 0x355:
+            text = f"SOC {struct.unpack_from('<H', d)[0]} % · SOH {struct.unpack_from('<H', d, 2)[0]} %"
+        elif ident == 0x356:
+            v, i, t = struct.unpack_from("<Hhh", d)
+            text = f"{v / 100:.2f} V · {i / 10:+.1f} A · {t / 10:.1f} °C"
+        elif 0x360 <= ident <= 0x363:
+            first = 4 * (ident - 0x360) + 1
+            text = f"cells {first}–{first + 3}: " + " ".join(f"{v} mV" for v in struct.unpack_from("<4H", d))
+        else:
+            text = PYLON.get(ident, "") + (" " if ident in PYLON else "") + data.hex()
+        label = "cells" if 0x360 <= ident <= 0x363 else PYLON.get(ident, f"0x{ident:03X}")
+        return "BMS→control", label, f"0x{ident:03X}  {text}"
     if ident == 0x1801FFAA:
         return "control→BMS", "BMS poll", "0x1801FFAA  BMS poll"
     if (ident & 0x1F00FFFF) == 0x1800AA01:
@@ -582,61 +618,57 @@ def decode_venus_can(ident: int, data: bytes, sender: str) -> tuple:
         else:
             text = data.hex()
         return "BMS→control", f"BMS 0x{pf:02X}", f"0x{ident:08X}  {text}"
-    func, src = ident & 0xFF, (ident >> 16) & 0xFF
-    name = MICRO_FUNCS.get(func, f"func 0x{func:02X}")
-    if src == 0x41:
-        idx = ident >> 24
-        if func == 0x01 and len(data) >= 4:
+    func, src, dst = ident & 0xFF, (ident >> 16) & 0xFF, (ident >> 8) & 0xFF
+    if src in NODES:
+        node = NODES[src]
+        names = MPPT_FUNCS if node == "MPPT" else MICRO_FUNCS
+        name = names.get(func, f"func 0x{func:02X}")
+        if func == 0x01 and len(data) >= 4 and node == "inverter":
             text = f"setpoint echo {struct.unpack_from('<i', d)[0]} W"
         elif not data:
             text = f"ack {name}"
         else:
-            text = f"{name} part {idx}: {data.hex()}"
-        return "inverter→control", name if data else "ack", f"0x{ident:08X}  {text}"
-    if (ident & 0xF000) == 0x4000:
+            text = f"{name} part {ident >> 24}: {data.hex()}"
+        return f"{node}→control", name if data else "ack", f"0x{ident:08X}  {text}"
+    if dst in NODES:
+        node = NODES[dst]
+        names = MPPT_FUNCS if node == "MPPT" else MICRO_FUNCS
+        name = names.get(func, f"func 0x{func:02X}")
         if func == 0x01 and len(data) >= 4:
-            text = f"setpoint {struct.unpack_from('<i', d)[0]} W"
-        elif func in (0x03, 0x04) and len(data) >= 4:
+            text = f"{'setpoint' if node == 'inverter' else 'PV limit'} {struct.unpack_from('<i', d)[0]} W"
+        elif func in (0x03, 0x04) and len(data) >= 4 and node == "inverter":
             text = f"{name} {struct.unpack_from('<i', d)[0]} W"
         else:
             text = name + (f" {data.hex()}" if data else "")
-        return "control→inverter", name, f"0x{ident:08X}  {text}"
+        return f"control→{node}", name, f"0x{ident:08X}  {text}"
     return f"{sender}→bus", f"0x{ident:X}", f"0x{ident:08X}  {data.hex()}"
 
 
-class VenusE3Session(DeviceSession):
-    """A Venus E 3.0 in a house: the control MCU and the BMS MCU running their
-    firmware (the BMS in its own process), the KA495XX front end with 16
-    cells, and the inverter board model on the internal CAN bus."""
+# ================================================================== the CAN family
+class CanBoardSession(DeviceSession):
+    """Devices with a control MCU on an internal CAN bus: the Venus E 3.0, D
+    and A, the Jupiter and the Venus C/E.  Taps the bus, decodes every frame,
+    and keeps what the BMS last reported."""
 
-    MODEL = "Venus E 3.0"
     CHANNELS = ("FW", "CAN", "UART6", "MQTT", "RF", "BLE", "EVT", "ALARM")
 
-    def __init__(self, firmware: str, *, bms: str, device_type: Optional[str] = None, **kw):
+    def __init__(self, firmware: str, *, bms: Optional[str] = None, device_type: Optional[str] = None, **kw):
         self.bms_image = bms
         self.can = {"frames": 0, "by_dir": collections.Counter()}
         self._can_last: Dict[str, float] = {}
+        self.bms_seen: Dict[str, float] = {}
         super().__init__(firmware, **kw)
-        # a control image lists every type it serves; this session is the E 3.0
-        self.device_type = device_type or "VNSE3-0"
-
-    def _build(self, control_kwargs: dict, soc: float, **_):
-        from ..plant.battery import LfpPack
-        from ..plant.venus3 import PowerStage, VenusE3
-        pack = LfpPack(cells_n=VenusE3.CELLS, capacity_ah=VenusE3.CAPACITY_AH, soc=soc / 100.0,
-                       temp_c=self.ambient_c, ambient_c=self.ambient_c, spread=0.01)
-        self.stage = PowerStage(ambient_c=self.ambient_c)
-        dev = VenusE3(self.firmware, self.bms_image, pack=pack, stage=self.stage, control_kwargs=control_kwargs,
-                      parallel=True)
-        self.micro = dev.micro
-        return dev
+        if device_type:
+            self.device_type = device_type
 
     def _hook_device(self) -> None:
         def frame(f) -> None:
             self.can["frames"] += 1
             sender = getattr(f.sender, "name", "?")
-            direction, label, text = decode_venus_can(f.ident, f.data, sender)
+            direction, label, text = decode_venus_can(f.ident, f.data, sender, f.ext)
             self.can["by_dir"][direction] += 1
+            if direction == "BMS→control":
+                self._note_bms(f.ident, f.data, f.ext)
             # the bus carries hundreds of frames a second: log each kind at most every 2 s
             key = f"{direction}:{label}"
             if f.t - self._can_last.get(key, -1e9) >= 2.0:
@@ -644,34 +676,371 @@ class VenusE3Session(DeviceSession):
                 self._log("CAN", direction, text)
         self.dev.bus.monitors.append(frame)
 
+    def _note_bms(self, ident: int, data: bytes, ext: bool) -> None:
+        d, b = data + bytes(8), self.bms_seen
+        if ext and (ident >> 16) & 0xFF == 1:
+            v, i, t, soc = struct.unpack_from("<HhhH", d)
+            b.update(v=v / 100, a=i / 10, temp=t / 10, soc=soc / 10, t=self.dev.time)
+        elif ext and (ident >> 16) & 0xFF == 3:
+            cv, ci, di = struct.unpack_from("<HHH", d)
+            b.update(charge_v=cv / 10, charge_a=ci / 10, discharge_a=di / 10, flags=d[6])
+        elif ext and (ident >> 16) & 0xFF == 4:
+            b["protect"] = struct.unpack_from("<I", d)[0]
+        elif not ext and ident == 0x356:
+            v, i, t = struct.unpack_from("<Hhh", d)
+            b.update(v=v / 100, a=i / 10, temp=t / 10, t=self.dev.time)
+        elif not ext and ident == 0x355:
+            b["soc"] = float(struct.unpack_from("<H", d)[0])
+        elif not ext and ident == 0x351:
+            cv, ci, di = struct.unpack_from("<HHH", d)
+            b.update(charge_v=cv / 10, charge_a=ci / 10, discharge_a=di / 10)
+
+    def _bms_snapshot(self) -> dict:
+        b = self.bms_seen
+        return {"soc": b.get("soc"), "v": b.get("v"), "a": b.get("a"), "charge_v": b.get("charge_v"),
+                "charge_a": b.get("charge_a"), "discharge_a": b.get("discharge_a"), "flags": b.get("flags", 0),
+                "protect": b.get("protect", 0), "seen": round(self.dev.time - b["t"], 1) if "t" in b else None,
+                "image": os.path.basename(self.bms_image) if self.bms_image else None}
+
     def _set_ambient(self, c: float) -> None:
-        self.stage.ambient_c = c
+        stage = getattr(self, "stage", None)
+        if stage is not None and hasattr(stage, "ambient_c"):
+            stage.ambient_c = c
+
+    def _can_snapshot(self) -> dict:
+        return {"frames": self.can["frames"], "by_dir": dict(self.can["by_dir"])}
+
+
+class VenusBoardSession(CanBoardSession):
+    """A Venus E 3.0, D or A: control and BMS firmware (each BMS in its own
+    process), the inverter board model, the MPPT model on the D and A, and one
+    or more packs."""
+
+    DEVICE = "VenusE3"
+    PV_INPUTS = 0
+
+    def __init__(self, firmware: str, *, bms: str, pv=(300.0, 300.0, 0.0, 0.0), packs: int = 1, **kw):
+        self.sun = [float(x) for x in pv][:4] + [0.0] * (4 - len(pv[:4]))
+        self.n_packs = max(1, int(packs))
+        super().__init__(firmware, bms=bms, **kw)
+
+    def _build(self, control_kwargs: dict, soc: float, **_):
+        from ..plant import venus3, venusa, venusd
+        from ..plant.battery import LfpPack
+        cls = {"VenusE3": venus3.VenusE3, "VenusD": venusd.VenusD, "VenusA": venusa.VenusA}[self.DEVICE]
+        n = min(self.n_packs, cls.MAX_PACKS)
+        packs = [LfpPack(cells_n=cls.CELLS, capacity_ah=cls.CAPACITY_AH, soc=soc / 100.0, temp_c=self.ambient_c,
+                         ambient_c=self.ambient_c, spread=0.01) for _ in range(n)]
+        self.stage = venus3.PowerStage(ambient_c=self.ambient_c)
+        kw = {"pv": self.sun} if self.PV_INPUTS else {}
+        dev = cls(self.firmware, self.bms_image, pack=packs[0], packs=packs if n > 1 else None, stage=self.stage,
+                  control_kwargs=control_kwargs, parallel=True, **kw)
+        self.micro = dev.micro
+        return dev
+
+    def _apply_device(self, c: dict) -> bool:
+        if c.get("op") == "pv" and self.PV_INPUTS:
+            self.sun = [max(0.0, float(x)) for x in c["w"]][:4]
+            self.sun += [0.0] * (4 - len(self.sun))
+            self.dev.mppt.set_pv(self.sun)
+            return True
+        if c.get("op") == "scenario" and c.get("name") == "cloud" and self.PV_INPUTS:
+            sun = list(self.sun)
+            self.dev.mppt.set_pv([w * 0.15 for w in sun])
+            self._log("EVT", "", "scenario: passing cloud, PV to 15 % for 40 s")
+            self._mark = "cloud"
+
+            def sun_back():
+                self.dev.mppt.set_pv(self.sun)
+                self._log("EVT", "", "scenario: cloud passed")
+                self._mark = "sun back"
+            self.dev.sim.after(40.0, sun_back)
+            return True
+        return False
+
+    def _sample(self) -> dict:
+        mppt = getattr(self.dev, "mppt", None)
+        return {"pv": round(sum(mppt.pv_w), 1) if mppt else 0.0}
+
+    def _micro_snapshot(self) -> dict:
+        mi = self.micro
+        hi, lo = mi.limits()
+        return {"reference": round(mi.reference, 1), "ac": round(mi.ac_power, 1), "dc": round(mi.dc_power, 1),
+                "connected": bool(mi.connected), "limit_discharge": round(hi), "limit_charge": round(lo),
+                "charge_limit_w": mi.charge_limit_w, "discharge_limit_w": mi.discharge_limit_w,
+                "cutoff_soc": mi.cutoff_soc, "max_soc": mi.max_soc, "work_mode": mi.work_mode,
+                "temp_llc": round(mi.temp_llc, 1), "temp_inv": round(mi.temp_inv, 1),
+                "errors": [mi.err1, mi.err2, mi.warn1], "version": mi.version}
+
+    def _mppt_snapshot(self) -> Optional[dict]:
+        mppt = getattr(self.dev, "mppt", None)
+        if mppt is None:
+            return None
+        return {"avail": [round(x, 1) for x in self.sun], "pv": [round(x, 1) for x in mppt.pv_w],
+                "limit": mppt.limit_w, "dc": round(mppt.dc_power, 1), "mode": mppt.mode,
+                "version": getattr(mppt, "version", None)}
 
     def _device_snapshot(self) -> dict:
         mi, d = self.micro, self.dev
-        hi, lo = mi.limits()
-        return {
-            "inverter": {"reference": round(mi.reference, 1), "ac": round(mi.ac_power, 1), "dc": round(mi.dc_power, 1),
-                         "connected": bool(mi.connected), "limit_discharge": round(hi), "limit_charge": round(lo),
-                         "charge_limit_w": mi.charge_limit_w, "discharge_limit_w": mi.discharge_limit_w,
-                         "cutoff_soc": mi.cutoff_soc, "max_soc": mi.max_soc, "work_mode": mi.work_mode,
-                         "temp_llc": round(mi.temp_llc, 1), "temp_inv": round(mi.temp_inv, 1),
-                         "errors": [mi.err1, mi.err2, mi.warn1], "version": mi.version},
-            "bms": {"soc": mi.bms_soc, "v": mi.bms_v, "a": mi.bms_i, "charge_v": mi.bms_chg_v,
-                    "charge_a": mi.bms_chg_i, "discharge_a": mi.bms_dis_i, "flags": mi.bms_flags,
-                    "protect": mi.bms_protect, "seen": round(d.time - mi.bms_seen, 1) if mi.bms_seen > -1e8 else None,
-                    "mos": d.mos(), "image": os.path.basename(self.bms_image), "process": "own process"},
-            "can": {"frames": self.can["frames"], "by_dir": dict(self.can["by_dir"])},
-        }
+        bms = self._bms_snapshot()
+        bms.update({k: v for k, v in {"soc": mi.bms_soc, "v": mi.bms_v, "a": mi.bms_i, "charge_v": mi.bms_chg_v,
+                                       "charge_a": mi.bms_chg_i, "discharge_a": mi.bms_dis_i, "flags": mi.bms_flags,
+                                       "protect": mi.bms_protect}.items()})
+        bms.update(mos=d.mos(), process="own process", real=True)
+        packs = [{"soc": round(p.soc * 100, 1), "v": round(p.voltage, 2), "a": round(p.current_a, 2),
+                  "mos": m} for p, m in zip(d.packs, d.mos_all())]
+        return {"inverter": self._micro_snapshot(), "bms": bms, "packs": packs, "mppt": self._mppt_snapshot(),
+                "can": self._can_snapshot()}
+
+
+class VenusE3Session(VenusBoardSession):
+    """A Venus E 3.0: control and BMS firmware, the inverter board model, one pack."""
+    MODEL = "Venus E 3.0"
+    DEVICE = "VenusE3"
+
+    def __init__(self, firmware: str, *, device_type: Optional[str] = None, **kw):
+        kw.pop("pv", None)
+        super().__init__(firmware, device_type=device_type or "VNSE3-0", **kw)
+
+
+class VenusDSession(VenusBoardSession):
+    """A Venus D: control and BMS firmware, the inverter and MPPT models, its packs."""
+    MODEL = "Venus D"
+    DEVICE = "VenusD"
+    PV_INPUTS = 4
+
+    def __init__(self, firmware: str, *, device_type: Optional[str] = None, **kw):
+        super().__init__(firmware, device_type=device_type or "VNSD-0", **kw)
+
+
+class VenusASession(VenusBoardSession):
+    """A Venus A: control and BMS firmware (SH36735 front end, 13 cells), the
+    inverter model with its four PV inputs, its packs."""
+    MODEL = "Venus A"
+    DEVICE = "VenusA"
+    PV_INPUTS = 4
+
+    def __init__(self, firmware: str, *, device_type: Optional[str] = None, **kw):
+        super().__init__(firmware, device_type=device_type or "VNSA-0", **kw)
+
+
+# ============================================================================ Jupiter
+class JupiterSession(VenusBoardSession):
+    """A Jupiter C/E or C Plus: the control firmware, the inverter and MPPT
+    models, and the BMS: the C Plus's real BMS firmware when its image is
+    given, else a BMS model speaking the Pylontech-style set."""
+
+    MODEL = "Jupiter"
+    PV_INPUTS = 4
+    CHANNELS = ("FW", "CAN", "USART1", "MQTT", "RF", "BLE", "EVT", "ALARM")
+
+    def __init__(self, firmware: str, *, bms: Optional[str] = None, device_type: Optional[str] = None, **kw):
+        kw.pop("packs", None)
+        self.cplus = bool(bms) or "JPLS" in os.path.basename(firmware).upper()
+        self.MODEL = "Jupiter C Plus" if self.cplus else "Jupiter C/E"
+        self.sun = [float(x) for x in kw.pop("pv", (300.0, 300.0, 0.0, 0.0))][:4]
+        self.sun += [0.0] * (4 - len(self.sun))
+        self.n_packs = 1
+        CanBoardSession.__init__(self, firmware, bms=bms, device_type=device_type, **kw)
+        if not device_type:
+            # the image lists the meters' types too: its own is a Jupiter one
+            try:
+                from ..cli import image_info
+                types = image_info(firmware).get("device_types") or []
+            except Exception:                                    # noqa: BLE001 - only a label
+                types = []
+            own = ("JPLS",) if self.cplus else ("HMM", "HMN")
+            self.device_type = next((t for t in types if t.startswith(own)), self.device_type)
+
+    def _build(self, control_kwargs: dict, soc: float, **_):
+        from ..plant.battery import LfpPack
+        from ..plant.jupiter import Jupiter
+        from ..plant.venus3 import PowerStage
+        pack = LfpPack(cells_n=Jupiter.CELLS, capacity_ah=Jupiter.CAPACITY_AH, soc=soc / 100.0,
+                       temp_c=self.ambient_c, ambient_c=self.ambient_c, spread=0.01)
+        self.stage = PowerStage(ambient_c=self.ambient_c)
+        dev = Jupiter(self.firmware, self.bms_image, pv=self.sun, pack=pack, stage=self.stage,
+                      control_kwargs=control_kwargs)
+        self.micro = dev.micro
+        return dev
+
+    def _device_snapshot(self) -> dict:
+        mi, d = self.micro, self.dev
+        bms = self._bms_snapshot()
+        bms.update({k: v for k, v in {"soc": mi.bms_soc, "v": mi.bms_v, "a": mi.bms_i, "charge_v": mi.bms_chg_v,
+                                       "charge_a": mi.bms_chg_i, "discharge_a": mi.bms_dis_i,
+                                       "flags": mi.bms_flags}.items() if v})
+        real = d.front is not None
+        mos = d.front.mos() if real else {"charge": True, "discharge": True}
+        bms.update(mos=mos, real=real, process="this process" if real else "model (Pylontech-style frames)")
+        return {"inverter": self._micro_snapshot(), "bms": bms, "packs": [], "mppt": self._mppt_snapshot(),
+                "can": self._can_snapshot()}
+
+
+# ========================================================================== Venus C/E
+class VenusCESession(CanBoardSession):
+    """A Venus C/E: the control MCU (STM32G474) runs the power stage itself;
+    marsemu models it at the control's pins (HRTIM, ADC, relays). The BMS
+    firmware runs in its own process on CAN.  About a sixth of real time."""
+
+    MODEL = "Venus C/E"
+    CHANNELS = ("FW", "CAN", "LPUART1", "MQTT", "RF", "BLE", "EVT", "ALARM")
+
+    def __init__(self, firmware: str, *, bms: str, device_type: Optional[str] = None, **kw):
+        kw.pop("pv", None)
+        kw.pop("packs", None)
+        super().__init__(firmware, bms=bms, device_type=device_type, **kw)
+        if not device_type:
+            self.device_type = "HMG-50"
+
+    def _build(self, control_kwargs: dict, soc: float, **_):
+        from ..plant.battery import LfpPack
+        from ..plant.venusce import VenusCE
+        pack = LfpPack(cells_n=VenusCE.CELLS, capacity_ah=VenusCE.CAPACITY_AH, soc=soc / 100.0,
+                       temp_c=self.ambient_c, ambient_c=self.ambient_c, spread=0.01)
+        dev = VenusCE(self.firmware, self.bms_image, pack=pack, control_kwargs=control_kwargs, parallel=True)
+        self.stage = dev.stage
+        return dev
+
+    def _device_snapshot(self) -> dict:
+        st = self.stage.status()
+        bms = self._bms_snapshot()
+        bms.update(mos=self.dev.mos(), process="own process", real=True)
+        return {"stage": st, "bms": bms, "can": self._can_snapshot(),
+                "inverter": {"reference": None, "ac": st["ac_w"], "dc": -st["bat_w"], "connected": bool(st["relay"])}}
+
+
+# ======================================================================= CT002 / CT003
+class _MeterDevice:
+    """The CT meter on its own timeline: one MCU, no plant."""
+
+    def __init__(self, firmware: str, control_kwargs: dict):
+        from ..emulator import Emulator
+        from ..plant.cosim import CoSim
+        self.sim = CoSim(slice_s=0.01)
+        self.control = Emulator(firmware, **control_kwargs)
+        self.sim.add_emulator(self.control)
+        self.ac_power = 0.0
+
+    @property
+    def time(self) -> float:
+        return self.sim.now
+
+    def run(self, seconds: float, until=None) -> None:
+        self.sim.run(seconds, until)
+
+    def close(self) -> None:
+        self.sim.close()
+        self.control.save_state()
+
+
+class CtSession(DeviceSession):
+    """A CT002/CT003 meter: its firmware with the Wi‑Fi module model, polled by
+    virtual batteries the way real ones poll it.  Its current clamps are not
+    modelled, so it measures 0 W; its answers are the firmware's own."""
+
+    MODEL = "CT002 / CT003"
+    HAS_PACK = False
+    HAS_HOUSE = False
+    CHANNELS = ("FW", "USART1", "UDP", "MQTT", "RF", "BLE", "EVT", "ALARM")
+    POLL_S = 2.7
+
+    def __init__(self, firmware: str, *, batteries: int = 2, battery_w: float = 300.0, **kw):
+        for k in ("pv", "packs", "bms", "extension_packs"):
+            kw.pop(k, None)
+        self.batteries = [{"type": "HMJ-2" if k == 0 else "VNSE3-0", "mac": f"c8478c00aa{k + 1:02x}",
+                           "phase": "ABC"[k % 3], "w": float(battery_w), "replies": 0, "last": None}
+                          for k in range(3)]
+        self.n_batteries = max(0, min(3, int(batteries)))
+        self.replies = 0
+        self.last_reply: Optional[List[str]] = None
+        kw["load"] = 0.0                                        # a meter has no house of its own here
+        super().__init__(firmware, **kw)
+
+    def _build(self, control_kwargs: dict, soc: float, **_):
+        return _MeterDevice(self.firmware, control_kwargs)
+
+    @property
+    def ct_id(self) -> str:
+        # the meter answers polls addressed to the module's BLE MAC (its id towards the cloud)
+        return self.emu.fc41d.cfg.ble_mac.replace(":", "").lower()
+
+    def _hook_device(self) -> None:
+        from ..plant.venus3_cli import ct_fields
+        net = self.emu.fc41d.net
+        orig = net.socket_send
+
+        def send(s, data, extra):
+            f = ct_fields(bytes(data))
+            if f and len(f) > 4:
+                self.replies += 1
+                self.last_reply = f
+                bat = next((b for b in self.batteries if b["mac"] == f[3]), None)
+                if bat is not None:
+                    bat["replies"] += 1
+                    bat["last"] = f
+                self._log("UDP", "CT→battery", f"to {f[3]}: A {f[4]} W · B {f[5]} W · C {f[6]} W · total {f[7]} W"
+                          f" · batteries per phase {'/'.join(f[8:11])} · RSSI {f[12] if len(f) > 12 else '?'}")
+            return orig(s, data, extra)
+        net.socket_send = send
+        self.dev.sim.every(self.POLL_S, self._poll)
+
+    def _service_socket(self) -> Optional[int]:
+        for sid, s in self.emu.fc41d.sockets.items():
+            if getattr(s, "kind", "") == "UDP SERVICE" and getattr(s, "local_port", 0) == 12345:
+                return sid
+        return None
+
+    def _poll(self, now: float) -> None:
+        from ..plant.venus3_cli import ct_payload
+        sid = self._service_socket()
+        if sid is None or self.faults["wifi"]:
+            return
+        mod = self.emu.fc41d
+        for k, b in enumerate(self.batteries[:self.n_batteries]):
+            data = ct_payload([b["type"], b["mac"], "HME-4", self.ct_id, b["phase"], str(int(b["w"])), "1"])
+            self._log("UDP", "battery→CT", f"{b['type']} {b['mac']} polls: phase {b['phase']}, delivering {b['w']:.0f} W")
+            mod.post(lambda d=data, k=k: mod.socket_received(sid, d, (f"192.168.1.{60 + k}", 12345)))
+
+    def _apply_device(self, c: dict) -> bool:
+        op = c.get("op")
+        if op == "batteries":
+            self.n_batteries = max(0, min(3, int(c["n"])))
+            return True
+        if op == "battery_w":
+            for b in self.batteries:
+                b["w"] = float(c["w"])
+            return True
+        if op in ("load", "pv", "ambient", "scenario"):
+            return True                                         # nothing to drive on a meter
+        return False
+
+    def _sample(self) -> dict:
+        f = self.last_reply or []
+        num = lambda i: float(f[i]) if len(f) > i and f[i].lstrip("-").isdigit() else 0.0
+        # the charts' other series have nothing to show on a meter: zeros keep them drawable
+        return {"grid": num(7), "ac": sum(b["w"] for b in self.batteries[:self.n_batteries]), "pv": 0.0,
+                "bat": 0.0, "soc": 0.0, "v": 0.0, "cmin": 0.0, "cmax": 0.0, "bal": False, "replies": self.replies}
+
+    def _device_snapshot(self) -> dict:
+        return {"meter": {"id": self.ct_id, "replies": self.replies, "last": self.last_reply,
+                          "socket": self._service_socket() is not None, "clamps": "not modelled (0 W)"},
+                "batteries": [{k: v for k, v in b.items()} for b in self.batteries[:self.n_batteries]]}
 
 
 SESSION_TYPES: Dict[str, Callable[..., DeviceSession]] = {
-    "b2500-v1": B2500Session, "b2500-v2": B2500Session, "b2500-v3": B2500Session,
+    "b2500-v1": B2500Session, "b2500-v2": B2500Session, "b2500-v3": B2500Session, "ct00x": CtSession,
 }
-#: control profile -> (session, device types it covers); these need a BMS image too
-PAIRED_TYPES: Dict[str, tuple] = {
-    "venus3": (VenusE3Session, ("VNSE3-0",)),
+#: control profile -> [(session, device types it covers)]: the control image's types tell them apart
+PAIRED_TYPES: Dict[str, list] = {
+    "venus3": [(VenusE3Session, ("VNSE3-0", "VNSEE3-0")), (VenusDSession, ("VNSD-0",)),
+               (VenusASession, ("VNSA-0",))],
+    "venus": [(VenusCESession, ("HMG-1", "HMG-25", "HMG-50"))],
+    "jupiter": [(JupiterSession, ("JPLS-8H", "HMM-1", "HMM-2", "HMN-1", "HMN-2"))],
 }
+#: sessions that run without a BMS image too
+BMS_OPTIONAL = (JupiterSession,)
 
-__all__ = ["DeviceSession", "B2500Session", "VenusE3Session", "SESSION_TYPES", "PAIRED_TYPES", "Event",
+__all__ = ["DeviceSession", "B2500Session", "VenusE3Session", "VenusDSession", "VenusASession", "JupiterSession",
+           "VenusCESession", "CtSession", "SESSION_TYPES", "PAIRED_TYPES", "BMS_OPTIONAL", "Event",
            "decode_venus_can"]

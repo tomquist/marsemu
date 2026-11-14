@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from .session import PAIRED_TYPES, SESSION_TYPES, DeviceSession
+from .session import BMS_OPTIONAL, PAIRED_TYPES, SESSION_TYPES, DeviceSession
 
 log = logging.getLogger("marsemu.ui")
 
@@ -108,18 +108,33 @@ class UiApp:
                       meter=self.meter, speed=float(o.get("speed", 1.0)), device_type=o.get("device_type") or None,
                       setup=bool(o.get("setup", True)),
                       state_dir=os.path.join(self.state_dir, os.path.splitext(name)[0]) if self.state_dir else None)
-        if info["needs_bms"]:
+        path = os.path.join(self.firmware_dir, name)
+        if info["profile"] in PAIRED_TYPES:
+            cls = next(c for c, _ in PAIRED_TYPES[info["profile"]] if c.__name__ == info["session"])
             bms = os.path.basename(str(opts.get("bms") or ""))
-            if not any(i["name"] == bms and i["role"] == "bms" for i in images):
+            have = any(i["name"] == bms and i["role"] == "bms" for i in images)
+            if bms and not have:
+                raise FileNotFoundError(f"no BMS image {bms!r} in the firmware folder")
+            if info["needs_bms"] and not have:
                 raise ValueError(f"{info['model']} needs its BMS image too: add it and pick it")
-            cls = PAIRED_TYPES[info["profile"]][0]
+            extra = {}
+            if info["pv_inputs"]:
+                pv = [float(x) for x in o.get("pv", (300.0, 300.0))][:4]
+                extra["pv"] = pv + [0.0] * (4 - len(pv))
+            if info["packs"]:
+                extra["packs"] = int(o.get("packs", 1))
             self.stop()
-            sess = cls(os.path.join(self.firmware_dir, name), bms=os.path.join(self.firmware_dir, bms), **common)
+            sess = cls(path, bms=os.path.join(self.firmware_dir, bms) if have else None, **extra, **common)
+        elif info["profile"] == "ct00x":
+            cls = SESSION_TYPES[info["profile"]]
+            self.stop()
+            sess = cls(path, batteries=int(o.get("batteries", 2)), battery_w=float(o.get("battery_w", 300.0)),
+                       **common)
         else:
             cls = SESSION_TYPES[info["profile"]]
             self.stop()
-            sess = cls(os.path.join(self.firmware_dir, name), pv=o.get("pv", (300.0, 300.0)),
-                       extension_packs=int(o.get("extension_packs", 0)), **common)
+            sess = cls(path, pv=o.get("pv", (300.0, 300.0)), extension_packs=int(o.get("extension_packs", 0)),
+                       **common)
         with self.lock:
             self.session = sess
         sess.start()
@@ -143,15 +158,25 @@ def describe(name: str, size: int, info: dict) -> dict:
     """An image as the start screen lists it: which device it runs, or that it is a BMS image."""
     profile, types = info.get("profile"), info.get("device_types") or []
     d = {"name": name, "size": size, "profile": profile, "device_type": info.get("device_type_default"),
-         "error": info.get("error"), "role": "device", "model": None, "supported": False, "needs_bms": False}
+         "error": info.get("error"), "role": "device", "model": None, "supported": False, "needs_bms": False,
+         "bms_optional": False, "pv_inputs": 0, "packs": False}
     if profile in SESSION_TYPES:
-        d.update(model=SESSION_TYPES[profile].MODEL, supported=True)
+        cls = SESSION_TYPES[profile]
+        d.update(model=cls.MODEL, supported=True, session=cls.__name__,
+                 pv_inputs=2 if cls.__name__ == "B2500Session" else 0,
+                 device_type=d["device_type"] or next(iter(types), None))
     elif profile in PAIRED_TYPES:
-        cls, covered = PAIRED_TYPES[profile]
-        hit = next((t for t in covered if t in types), None)
-        # a control image lists the types it serves; the file name tells the variant apart
-        if hit and not re.search(r"VNS[AD]", name, re.I):
-            d.update(model=cls.MODEL, supported=True, needs_bms=True, device_type=hit)
+        # a control image lists every type it serves (and the meters'): its own decides
+        for cls, covered in PAIRED_TYPES[profile]:
+            hit = next((t for t in covered if t in types), None)
+            if hit:
+                model = cls.MODEL
+                if cls.__name__ == "JupiterSession":
+                    model = "Jupiter C Plus" if "JPLS" in name.upper() else "Jupiter C/E"
+                d.update(model=model, supported=True, needs_bms=cls not in BMS_OPTIONAL,
+                         bms_optional=cls in BMS_OPTIONAL, device_type=hit, session=cls.__name__,
+                         pv_inputs=getattr(cls, "PV_INPUTS", 0), packs=cls.__name__ in ("VenusDSession", "VenusASession"))
+                break
     elif profile == "aux":
         d["role"] = "bms"
     return d

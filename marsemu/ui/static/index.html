@@ -37,12 +37,13 @@
     <div class="sect">
       <h3>Devices</h3>
       <div class="devs">
-        <div class="dev" id="devB2500">B2500 <small id="devState">ready</small></div>
-        <div class="dev" id="devVenusE3">Venus E 3.0 <small id="devStateV">ready</small></div>
-        <div class="dev">Venus D / A <small>planned</small></div>
-        <div class="dev">Venus C/E <small>planned</small></div>
-        <div class="dev">Jupiter <small>planned</small></div>
-        <div class="dev">CT002 / CT003 <small>planned</small></div>
+        <div class="dev" data-models="B2500">B2500 <small>ready</small></div>
+        <div class="dev" data-models="Venus E 3.0">Venus E 3.0 <small>ready</small></div>
+        <div class="dev" data-models="Venus D">Venus D <small>ready</small></div>
+        <div class="dev" data-models="Venus A">Venus A <small>ready</small></div>
+        <div class="dev" data-models="Venus C/E">Venus C/E <small>ready</small></div>
+        <div class="dev" data-models="Jupiter C/E|Jupiter C Plus">Jupiter C/E, C Plus <small>ready</small></div>
+        <div class="dev" data-models="CT002 / CT003">CT002 / CT003 <small>ready</small></div>
       </div>
     </div>
     <div class="sect">
@@ -58,19 +59,21 @@
     </div>
     <div class="sect">
       <h3 id="houseHead">House and sun</h3>
-      <div class="sl"><label for="sLoad">House load</label><output id="oLoad">400 W</output><input type="range" id="sLoad" min="0" max="2000" step="10" value="400"></div>
-      <div class="sl only-b2500"><label for="sPv1">PV 1 available</label><output id="oPv1">300 W</output><input type="range" id="sPv1" min="0" max="500" step="5" value="300"></div>
-      <div class="sl only-b2500"><label for="sPv2">PV 2 available</label><output id="oPv2">300 W</output><input type="range" id="sPv2" min="0" max="500" step="5" value="300"></div>
-      <div class="sl"><label for="sAmb">Ambient</label><output id="oAmb">22 °C</output><input type="range" id="sAmb" min="-10" max="45" step="1" value="22"></div>
+      <div class="sl only-ct"><label for="sBats">Batteries polling the meter</label><output id="oBats">2</output><input type="range" id="sBats" min="0" max="3" step="1" value="2"></div>
+      <div class="sl only-ct"><label for="sBatW">Power each battery reports</label><output id="oBatW">300 W</output><input type="range" id="sBatW" min="-2500" max="2500" step="50" value="300"></div>
+      <div class="sl only-house"><label for="sLoad">House load</label><output id="oLoad">400 W</output><input type="range" id="sLoad" min="0" max="2000" step="10" value="400"></div>
+      <div class="sl only-pv"><label for="sPv1">PV 1 available</label><output id="oPv1">300 W</output><input type="range" id="sPv1" min="0" max="500" step="5" value="300"></div>
+      <div class="sl only-pv"><label for="sPv2">PV 2 available</label><output id="oPv2">300 W</output><input type="range" id="sPv2" min="0" max="500" step="5" value="300"></div>
+      <div class="sl only-house"><label for="sAmb">Ambient</label><output id="oAmb">22 °C</output><input type="range" id="sAmb" min="-10" max="45" step="1" value="22"></div>
     </div>
     <div class="sect">
       <h3>Scenarios</h3>
       <div class="row">
         <button class="btn" id="askBtn" title="what hm2mqtt does: cd=1 on the device's command topic">Ask for status (cd=1)</button>
         <button class="btn" id="scStep">Load step +800 W</button>
-        <button class="btn only-b2500" id="scCloud">Passing cloud</button>
+        <button class="btn only-pv" id="scCloud">Passing cloud</button>
         <button class="btn only-b2500" id="scExport">Solar surplus</button>
-        <button class="btn only-venus" id="scHouseExport">House exports 600 W</button>
+        <button class="btn only-nopv" id="scHouseExport">House exports 600 W</button>
       </div>
     </div>
     <div class="sect">
@@ -164,15 +167,17 @@
       <div class="start" id="start" hidden>
         <div class="card">
           <h2>Start a device</h2>
-          <p>Pick a firmware image, or add one. marsemu runs the image unmodified in an emulator and models the hardware around it. The B2500 and the Venus E 3.0 for now; the other devices follow.</p>
+          <p>Pick a firmware image, or add one. marsemu runs the image unmodified in an emulator and models the hardware around it. Every device marsemu models: B2500, Venus E 3.0, D, A and C/E (with their BMS image), Jupiter C/E and C Plus, and the CT002/CT003 meter.</p>
           <div class="imgs" id="imgs"></div>
-          <label class="bmspick" id="bmsPick" hidden>BMS image (the Venus runs its BMS firmware too)<select id="bmsSel"></select></label>
+          <label class="bmspick" id="bmsPick" hidden>BMS image (runs the BMS firmware too)<select id="bmsSel"></select></label>
           <div class="drop" id="drop" tabindex="0" role="button">Drop a firmware image here, or click to choose one<input type="file" id="file" accept=".bin" hidden></div>
           <div class="opts">
             <label>PV 1, W<input type="number" id="oPvA" value="300" min="0" max="500"></label>
             <label>PV 2, W<input type="number" id="oPvB" value="300" min="0" max="500"></label>
             <label>House load, W<input type="number" id="oLoadS" value="400" min="0" max="3000"></label>
             <label>Charge, %<input type="number" id="oSoc" value="50" min="1" max="100"></label>
+            <label id="lPacks" hidden>Packs<input type="number" id="oPacks" value="1" min="1" max="9"></label>
+            <label id="lBats" hidden>Batteries polling<input type="number" id="oBats2" value="2" min="0" max="3"></label>
           </div>
           <div class="row"><button class="btn primary" id="startBtn" disabled>Start</button></div>
           <div class="err" id="startErr" role="alert"></div>

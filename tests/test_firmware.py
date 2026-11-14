@@ -787,3 +787,68 @@ def test_ui_session_b2500_steers_and_logs_every_bus():
     assert {"USART1", "RF", "MQTT", "I2C2", "UART5"} <= {e["ch"] for e in r["events"]}
     assert snap["mcu"]["regs"]["TIM8_CCR3"] and snap["mcu"]["irqs"]
     assert len(r["history"]) > 100
+
+
+UI_SESSIONS = [
+    ("venusd", "VNSD-0/Control/151", "VNSD-0/BMS/118"),
+    ("venusa", "VNSA-0/Control/151", "VNSA-0/BMS/115"),
+    ("jupiter-cplus", "JPLS-8H/143", "JPLS-8H/37"),
+    ("jupiter-bms-model", "JPLS-8H/143", None),
+]
+
+
+@pytest.mark.firmware
+@pytest.mark.parametrize("name,control,bms", UI_SESSIONS, ids=[u[0] for u in UI_SESSIONS])
+def test_ui_session_steers(name, control, bms):
+    """The dashboard's sessions for the Venus D and A and the Jupiter: the
+    firmware steers the grid to about 0 W and the CAN bus is decoded."""
+    import time
+    from marsemu.ui import session as S
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    ctl = sorted(glob.glob(f"{EXTRA}/**/{control}/*.bin", recursive=True))
+    bmi = sorted(glob.glob(f"{EXTRA}/**/{bms}/*.bin", recursive=True)) if bms else [None]
+    if not ctl or not bmi:
+        pytest.skip(f"{control} / {bms} not in the archive")
+    cls = {"venusd": S.VenusDSession, "venusa": S.VenusASession}.get(name, S.JupiterSession)
+    s = cls(ctl[0], bms=bmi[0], pv=(300, 300, 0, 0), load=500, speed=0)
+    s.start()
+    try:
+        deadline = time.time() + 900
+        while s.read()["snapshot"]["t"] < 90 and time.time() < deadline:
+            time.sleep(0.5)
+        r = s.read()
+    finally:
+        s.stop()
+    snap = r["snapshot"]
+    assert snap["error"] is None and snap["version"]
+    assert abs(snap["grid"]) < 60, snap["grid"]
+    assert snap["mppt"]["dc"] > 0
+    dirs = snap["can"]["by_dir"]
+    assert dirs.get("control→inverter") and dirs.get("BMS→control") and dirs.get("control→MPPT")
+    assert snap["bms"]["real"] == (bms is not None)
+
+
+@pytest.mark.firmware
+def test_ui_ct_session_answers_batteries():
+    """The CT meter's own firmware answers the virtual batteries' polls,
+    counting them per phase."""
+    import time
+    from marsemu.ui.session import CtSession
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/HME-4/124/*.bin", recursive=True))
+    if not files:
+        pytest.skip("CT002 HME-4 V124 not in the archive")
+    s = CtSession(files[0], batteries=2, speed=0)
+    s.start()
+    try:
+        deadline = time.time() + 300
+        while s.read()["snapshot"]["t"] < 30 and time.time() < deadline:
+            time.sleep(0.5)
+        snap = s.read()["snapshot"]
+    finally:
+        s.stop()
+    assert snap["meter"]["replies"] >= 5
+    assert [b["replies"] > 0 for b in snap["batteries"]] == [True, True]
+    assert snap["meter"]["last"][8:10] == ["1", "1"]          # one battery on phase A, one on B

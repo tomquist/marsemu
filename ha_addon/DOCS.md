@@ -14,8 +14,8 @@ steers against a CT002 meter, built in or AstraMeter.
 marsemu ships no firmware. Use the firmware of a device you own: open the
 panel and drop the image file into it, or copy it into the add-on's folder
 `/addon_configs/<id>_marsemu/firmware` (the Samba or File editor add-on reach
-it). The B2500 and the Venus E 3.0 (control and BMS image) are supported for now;
-the other devices follow.
+it). Every device marsemu models is supported: B2500, Venus E 3.0, D, A and C/E
+(each with its control and BMS image), Jupiter C/E and C Plus, CT002/CT003.
 
 ## Options
 

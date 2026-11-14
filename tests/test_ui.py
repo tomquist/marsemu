@@ -108,6 +108,14 @@ def test_images_are_classified():
     assert b["supported"] and b["model"] == "B2500" and not b["needs_bms"]
     v = describe("151_control_VNSE3-0.bin", 1, {"profile": "venus3", "device_types": ["HME-4", "VNSE3-0"]})
     assert v["supported"] and v["model"] == "Venus E 3.0" and v["needs_bms"]
-    d = describe("151_control_VNSD-0.bin", 1, {"profile": "venus3", "device_types": ["VNSD-0", "VNSE3-0"]})
-    assert not d["supported"]
+    d = describe("151_control_VNSD-0.bin", 1, {"profile": "venus3", "device_types": ["HME-4", "VNSD-0"]})
+    assert d["model"] == "Venus D" and d["needs_bms"] and d["pv_inputs"] == 4 and d["packs"]
+    a = describe("151_control_VNSA-0.bin", 1, {"profile": "venus3", "device_types": ["HME-4", "VNSA-0"]})
+    assert a["model"] == "Venus A"
+    ce = describe("158_control_HMG-50.bin", 1, {"profile": "venus", "device_types": ["HME-3", "HMG-1"]})
+    assert ce["model"] == "Venus C/E" and ce["needs_bms"]
+    j = describe("143_JPLS-8H_app.bin", 1, {"profile": "jupiter", "device_types": ["HME-3", "HMM-1", "JPLS-8H"]})
+    assert j["model"] == "Jupiter C Plus" and not j["needs_bms"] and j["bms_optional"]
+    ct = describe("124_HME-4.bin", 1, {"profile": "ct00x", "device_types": ["HME-4"]})
+    assert ct["supported"] and ct["model"] == "CT002 / CT003"
     assert describe("115_bms.bin", 1, {"profile": "aux"})["role"] == "bms"

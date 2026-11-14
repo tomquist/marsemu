@@ -42,10 +42,15 @@ const S = {
 function fromSnap(sn) {
   SN = sn;
   if (sn.model !== MODEL) buildLayout(sn.model, sn.channels);
-  S.t = sn.t; S.load = sn.load; S.grid = sn.grid; S.ac = sn.ac;
+  S.t = sn.t; S.load = sn.load; S.grid = sn.grid; S.ac = sn.ac; S.f = sn.faults; S.ext = sn.ext || [];
+  if (!sn.pack) {                       // the CT meter: no pack, no house of its own
+    S.pbat = 0; S.packV = 0; S.I = 0; S.soc = 0; S.cells = []; S.bal = []; S.temp = 0;
+    S.sun = [0, 0]; S.pv = [0, 0]; S.out = [0, 0]; S.target = 0; S.fets = { chg: true, dsg: true }; S.hs = 0;
+    return;
+  }
   S.pbat = sn.pack.w; S.packV = sn.pack.v; S.I = sn.pack.a; S.soc = sn.pack.soc / 100;
   S.cells = sn.pack.cells.map((v) => v / 1000);
-  S.temp = sn.pack.temp; S.f = sn.faults; S.ext = sn.ext || [];
+  S.temp = sn.pack.temp;
   if (sn.model === "B2500") {
     S.sun = sn.pv.map((p) => p.avail); S.pv = sn.pv.map((p) => p.w); S.pvV = sn.pv.map((p) => p.v);
     S.out = sn.out.map((o) => o.w); S.outV = sn.out.map((o) => o.v); S.outA = sn.out.map((o) => o.a);
@@ -54,12 +59,12 @@ function fromSnap(sn) {
     S.fets = { dsg: !!(sn.afe.fets & 1), chg: !!(sn.afe.fets & 2) };
     S.hs = sn.heatsink;
   } else {
-    S.sun = [0, 0]; S.pv = [0, 0]; S.out = [0, 0];
-    S.target = sn.inverter.reference;
+    S.sun = sn.mppt ? sn.mppt.avail : [0, 0]; S.pv = sn.mppt ? sn.mppt.pv : [0, 0]; S.out = [0, 0];
+    S.target = sn.inverter.reference ?? sn.inverter.ac;
     S.bal = S.cells.map(() => false);
     const mos = sn.bms.mos || {};
     S.fets = { dsg: !!mos.discharge, chg: !!mos.charge };
-    S.hs = sn.inverter.temp_inv;
+    S.hs = sn.inverter.temp_inv ?? 0;
   }
 }
 /* ------------------------------------------------------------ the drawing */
@@ -244,65 +249,220 @@ function buildB2500() {
     el("text", { class: "sil dim", x, y }, silG, t));
 }
 
-/* ---- Venus E 3.0: control, BMS and inverter board on an internal CAN bus */
-function buildVenusE3() {
-  CELLS = 16;
+/* ---- the Venus family and the Jupiter: control, BMS and inverter (and MPPT) on an internal CAN bus */
+const FAM = {
+  E3: { mcu: "N32G457 · CONTROL", chip: "Venus E 3.0", uart: "UART6", inv: "INVERTER BOARD", invBoard: "INVERTER BOARD (MODEL)", proto: "CAN protocol of Micro v119",
+    bms: "N32G45x · BMS", bmsKind: "real", afe: "KA495XX · FRONT END", eeprom: true, rs485: true },
+  D: { mcu: "N32G457 · CONTROL", chip: "Venus D", uart: "UART6", inv: "INVERTER BOARD", invBoard: "INVERTER BOARD (MODEL)", proto: "CAN protocol of Micro 116",
+    bms: "N32G45x · BMS", bmsKind: "real", afe: "KA49503 · FRONT END", eeprom: true, rs485: true, mppt: "MPPT CONTROLLER" },
+  A: { mcu: "N32G457 · CONTROL", chip: "Venus A", uart: "UART6", inv: "INVERTER + MPPT", invBoard: "INVERTER BOARD (MODEL)", proto: "the control's parsers (Micro 1211)",
+    bms: "N32G45x · BMS", bmsKind: "real", afe: "SH36735 · FRONT END", eeprom: true, rs485: true, mppt: "MPPT (INVERTER BOARD)" },
+  JP: { mcu: "N32G45x · CONTROL", chip: "Jupiter C Plus", uart: "USART1", inv: "INVERTER", invBoard: "INVERTER (MODEL)", proto: "the control's parsers",
+    bms: "N32 · BMS (C PLUS)", bmsKind: "real", afe: "KA49503 · FRONT END", mppt: "MPPT" },
+  J: { mcu: "N32G45x · CONTROL", chip: "Jupiter C/E", uart: "USART1", inv: "INVERTER", invBoard: "INVERTER (MODEL)", proto: "the control's parsers",
+    bms: "BMS (MODEL)", bmsKind: "model", afe: "FRONT END (IN THE MODEL)", mppt: "MPPT" },
+};
+let FV = FAM.E3;
+function packLabel() {
+  const p = SN && SN.pack, n = p ? p.cells.length : CELLS, ah = p ? p.capacity_ah : 100;
+  const more = SN && SN.packs && SN.packs.length > 1 ? ` · ${SN.packs.length} PACKS` : "";
+  return `PACK · ${n}S LFP · ${ah} Ah · ${(n * 3.2 * ah / 1000).toFixed(2)} kWh${more}`;
+}
+function cellGeometry() {
+  // 16 cells: 36 px wide; 13 cells: wider; 14 (B2500) has its own layout
+  const n = CELLS, span = 676, cg = n >= 16 ? 6.6 : 8, cw = (span - cg * (n - 1)) / n;
+  return [246, cw, cg];
+}
+function buildVenus(variant) {
+  FV = FAM[variant];
+  CELLS = SN && SN.pack ? SN.pack.cells.length : 16;
+  const pv = !!FV.mppt;
   COMP = {
-    mcu: { x: 480, y: 120, w: 170, h: 150, t: "N32G457 · CONTROL", kind: "real" },
-    eeprom: { x: 290, y: 104, w: 130, h: 46, t: "24C256 · EEPROM", kind: "model" },
-    rs485: { x: 290, y: 200, w: 130, h: 52, t: "RS485 · MODBUS", kind: "model" },
-    micro: { x: 720, y: 80, w: 210, h: 200, t: "INVERTER BOARD", kind: "model" },
-    bms: { x: 250, y: 362, w: 180, h: 64, t: "N32G45x · BMS", kind: "real" },
-    afe: { x: 450, y: 362, w: 150, h: 64, t: "KA495XX · FRONT END", kind: "model" },
+    mcu: { x: 480, y: 120, w: 170, h: 150, t: FV.mcu, kind: "real" },
+    micro: { x: 720, y: 80, w: 210, h: 200, t: FV.inv, kind: "model" },
+    bms: { x: 250, y: 362, w: 180, h: 64, t: FV.bms, kind: FV.bmsKind },
+    afe: { x: 450, y: 362, w: 150, h: 64, t: FV.afe, kind: "model" },
     fets: { x: 640, y: 368, w: 90, h: 44, t: "CHG · DSG", kind: "model" },
-    modbus: { x: 30, y: 196, w: 140, h: 60, t: "MODBUS CLIENT", kind: "ext" },
     ...OUTSIDE,
   };
+  if (FV.eeprom) COMP.eeprom = { x: 290, y: 104, w: 130, h: 46, t: "24C256 · EEPROM", kind: "model" };
+  if (FV.rs485) {
+    COMP.rs485 = { x: 290, y: 200, w: 130, h: 52, t: "RS485 · MODBUS", kind: "model" };
+    COMP.modbus = { x: 30, y: 196, w: 140, h: 60, t: "MODBUS CLIENT", kind: "ext" };
+  }
+  if (pv) {
+    COMP.mppt = { x: 770, y: 352, w: 160, h: 76, t: FV.mppt, kind: "model" };
+    for (let k = 0; k < 4; k++) COMP["string" + (k + 1)] = { x: 995 + (k % 2) * 82, y: 210 + Math.floor(k / 2) * 84, w: 74, h: 72, t: `PV ${k + 1}`, kind: "ext" };
+  }
   POWER = {
     bat: { d: "M790 280V300H685V470", c: "chg" },
-    acl: { d: "M930 180H1090V400", c: "dis" }, gridl: { d: "M1090 650V470", c: "dis" },
+    acl: { d: pv ? "M930 160H1182V435H1150" : "M930 180H1090V400", c: "dis" },
+    gridl: { d: "M1090 650V470", c: "dis" },
   };
+  if (pv) {
+    POWER.pvin = { d: "M995 250H962V390H930", c: "sol" };
+    POWER.mpptbat = { d: "M770 400H730", c: "sol" };
+  }
   DATA = {
     usart: { d: "M480 140H452V58H470", c: "uart" },
-    eep: { d: "M480 127H420", c: "i2c" },
-    rs: { d: "M480 226H420", c: "ana" },
-    rsext: { d: "M290 226H170", c: "ana" },
     caninv: { d: "M565 270V330H860V280", c: "ext" },
     canbms: { d: "M565 270V330H340V362", c: "ext" },
     spi: { d: "M430 394H450", c: "i2c" },
     gate: { d: "M600 390H640", c: "i2c" },
     ...RF,
   };
+  if (FV.eeprom) DATA.eep = { d: "M480 127H420", c: "i2c" };
+  if (FV.rs485) { DATA.rs = { d: "M480 226H420", c: "ana" }; DATA.rsext = { d: "M290 226H170", c: "ana" }; }
+  if (pv) DATA.canmppt = { d: "M565 270V330H850V352", c: "ext" };
   board(214, 44, 470, 270, "CONTROL BOARD");
-  board(700, 60, 250, 240, "INVERTER BOARD (MODEL)");
-  board(236, 344, 520, 92, "BMS BOARD");
-  board(236, 440, 688, 146, "PACK · 16S LFP · 100 Ah · 5.12 kWh");
+  board(700, 60, 250, 240, FV.invBoard);
+  board(236, 344, 520, 92, FV.bmsKind === "real" ? "BMS BOARD" : "BMS (MODEL)");
+  if (pv) board(756, 344, 188, 92, "MPPT (MODEL)");
+  board(236, 440, 688, 146, packLabel());
   el("path", { d: "M236 330H940", stroke: "var(--ext)", "stroke-opacity": .5, "stroke-width": 2.2, fill: "none", class: "hx", "data-k": "canbus" }, boardsDecor);
   el("text", { class: "ext-lab", x: 945, y: 334, style: "fill:var(--ext)" }, boardsDecor, "CAN");
   drawPaths();
   Object.keys(COMP).forEach(comp);
-  chip("mcu", "Venus E 3.0");
-  V.eep = valText("eeprom", 9, 34, "sub");
-  V.rs = valText("rs485", 9, 34, "sub"); V.rs2 = valText("rs485", 9, 46, "sub");
-  V.modbus = valText("modbus", 9, 36, "sub"); V.modbus2 = valText("modbus", 9, 50, "sub");
+  chip("mcu", FV.chip);
+  if (FV.eeprom) V.eep = valText("eeprom", 9, 34, "sub");
+  if (FV.rs485) {
+    V.rs = valText("rs485", 9, 34, "sub"); V.rs2 = valText("rs485", 9, 46, "sub");
+    V.modbus = valText("modbus", 9, 36, "sub"); V.modbus2 = valText("modbus", 9, 50, "sub");
+  }
+  if (pv) {
+    V.mppt = valText("mppt", 9, 40); V.mppt2 = valText("mppt", 9, 56, "sub"); V.mppt3 = valText("mppt", 9, 69, "sub");
+    for (let k = 1; k <= 4; k++) {
+      const c = COMP["string" + k], g = $("m-string" + k);
+      for (let r = 0; r < 2; r++) for (let q = 0; q < 3; q++)
+        el("rect", { x: c.x + 6 + q * 21, y: c.y + 22 + r * 14, width: 19, height: 12, fill: "#0e1d33", stroke: "#1f3656", "stroke-width": .6 }, g);
+      V["str" + k] = valText("string" + k, 9, 66, "sub");
+    }
+  }
   V.inv = valText("micro", 9, 42); V.invs = valText("micro", 9, 60, "sub"); V.invt = valText("micro", 9, 76, "sub");
   V.invu = valText("micro", 9, 92, "sub"); V.invv = valText("micro", 9, 108, "sub"); V.invw = valText("micro", 9, 124, "sub");
   V.invx = valText("micro", 9, 140, "sub");
+  V.bms = valText("bms", 9, FV.bmsKind === "real" ? 46 : 32, "sub"); V.bms2 = valText("bms", 9, FV.bmsKind === "real" ? 58 : 46, "sub");
+  V.afe = valText("afe", 9, 33, "sub"); V.afe2 = valText("afe", 9, 47, "sub");
+  V.fets = valText("fets", 45, 33, "sub", "middle");
+  drawOutside();
+  const [x0, cw, cg] = cellGeometry();
+  drawCells(x0, cw, cg, 474, 98, 462, 426, 8);
+  silBox(487, 160, 156, 70, [`CAN1 · ${FV.uart}${FV.eeprom ? " · I2C · RS485" : ""}`, "", "", "", "", ""], "mcu");
+  silBox(726, 196, 198, 70, [FV.proto, "", "", "", "", ""], "micro");
+  silBox(256, 300, 172, 30, ["BMS over CAN", ""], "bms");
+  silBox(456, 300, 142, 30, ["front end", ""], "afe");
+  silBox(624, 10, 120, 24, ["", ""], "fc");
+  [[`${FV.uart} · AT`, 412, 54], ["CAN 500 kbit/s", 590, 324], ["SPI", 432, 388]].forEach(([t, x, y]) =>
+    el("text", { class: "sil dim", x, y }, silG, t));
+}
+
+/* ---- Venus C/E: the control MCU runs the power stage itself */
+function buildVenusCE() {
+  CELLS = SN && SN.pack ? SN.pack.cells.length : 16;
+  COMP = {
+    mcu: { x: 480, y: 120, w: 170, h: 150, t: "STM32G474 · CONTROL", kind: "real" },
+    relay: { x: 745, y: 60, w: 175, h: 46, t: "GRID RELAY", kind: "model" },
+    bridge: { x: 745, y: 126, w: 175, h: 66, t: "INVERTER BRIDGE", kind: "model" },
+    dcbus: { x: 745, y: 212, w: 175, h: 56, t: "DC BUS", kind: "model" },
+    llc: { x: 745, y: 354, w: 175, h: 66, t: "LLC · BATTERY DC/DC", kind: "model" },
+    bms: { x: 250, y: 362, w: 180, h: 64, t: "BMS FIRMWARE", kind: "real" },
+    afe: { x: 450, y: 362, w: 150, h: 64, t: "KA495XX · FRONT END", kind: "model" },
+    fets: { x: 620, y: 368, w: 90, h: 44, t: "CHG · DSG", kind: "model" },
+    ...OUTSIDE,
+  };
+  POWER = {
+    bat: { d: "M832 354V292H665V470", c: "chg" },
+    llcbus: { d: "M832 268V354", c: "chg" },
+    busbr: { d: "M832 192V212", c: "chg" },
+    brrel: { d: "M832 106V126", c: "chg" },
+    acl: { d: "M920 83H1090V400", c: "dis" },
+    gridl: { d: "M1090 650V470", c: "dis" },
+  };
+  DATA = {
+    usart: { d: "M480 140H452V58H470", c: "uart" },
+    hrtimb: { d: "M650 160H745", c: "ana" },
+    hrtiml: { d: "M650 250H700V387H745", c: "ana" },
+    adc: { d: "M745 240H690V200H650", c: "ana" },
+    gpio: { d: "M650 135H720V83H745", c: "ana" },
+    canbms: { d: "M565 270V330H340V362", c: "ext" },
+    spi: { d: "M430 394H450", c: "i2c" },
+    gate: { d: "M600 390H620", c: "i2c" },
+    ...RF,
+  };
+  board(214, 44, 500, 270, "CONTROL BOARD · THE FIRMWARE RUNS THE POWER STAGE");
+  board(730, 44, 210, 392, "POWER STAGE (MODEL)");
+  board(236, 344, 480, 92, "BMS BOARD");
+  board(236, 440, 688, 146, packLabel());
+  el("path", { d: "M236 330H716", stroke: "var(--ext)", "stroke-opacity": .5, "stroke-width": 2.2, fill: "none", class: "hx", "data-k": "canbus" }, boardsDecor);
+  el("text", { class: "ext-lab", x: 640, y: 324, style: "fill:var(--ext)" }, boardsDecor, "FDCAN");
+  drawPaths();
+  Object.keys(COMP).forEach(comp);
+  chip("mcu", "Venus C/E");
+  V.relay = valText("relay", 9, 34, "sub");
+  V.bridge = valText("bridge", 9, 38); V.bridge2 = valText("bridge", 9, 54, "sub");
+  V.dcbus = valText("dcbus", 9, 40);
+  V.llc = valText("llc", 9, 38); V.llc2 = valText("llc", 9, 54, "sub");
   V.bms = valText("bms", 9, 46, "sub"); V.bms2 = valText("bms", 9, 58, "sub");
   V.afe = valText("afe", 9, 33, "sub"); V.afe2 = valText("afe", 9, 47, "sub");
   V.fets = valText("fets", 45, 33, "sub", "middle");
   drawOutside();
-  drawCells(246, 36, 6.6, 474, 98, 462, 426, 8);
-  silBox(487, 160, 156, 70, ["CAN1 · UART6 · I2C · RS485", "", "", "", "", ""], "mcu");
-  silBox(726, 196, 198, 70, ["CAN protocol of Micro v119", "", "", "", "", ""], "micro");
+  const [x0, cw, cg] = cellGeometry();
+  drawCells(x0, cw, cg, 474, 98, 462, 426, 8);
+  silBox(487, 160, 156, 70, ["HRTIM · ADC · CORDIC · FDCAN2", "", "", "", "", ""], "mcu");
   silBox(256, 300, 172, 30, ["BMS over CAN", ""], "bms");
   silBox(456, 300, 142, 30, ["front end", ""], "afe");
   silBox(624, 10, 120, 24, ["", ""], "fc");
-  [["UART6 · AT", 412, 54], ["CAN 500 kbit/s", 590, 324], ["SPI", 432, 388], ["I2C", 430, 121], ["UART", 430, 220]].forEach(([t, x, y]) =>
+  [["LPUART1 · AT", 412, 54], ["HRTIM", 668, 156], ["ADC", 690, 196], ["SPI", 432, 388]].forEach(([t, x, y]) =>
     el("text", { class: "sil dim", x, y }, silG, t));
 }
 
-const LAYOUTS = { "B2500": buildB2500, "Venus E 3.0": buildVenusE3 };
+/* ---- CT002 / CT003: the meter, polled by virtual batteries */
+function buildCt() {
+  CELLS = 0;
+  COMP = {
+    mcu: { x: 480, y: 120, w: 170, h: 150, t: "STM32F0 · METER", kind: "real" },
+    flash: { x: 290, y: 104, w: 130, h: 50, t: "SPI FLASH", kind: "model" },
+    clampA: { x: 280, y: 420, w: 140, h: 60, t: "CLAMP A", kind: "model" },
+    clampB: { x: 470, y: 420, w: 140, h: 60, t: "CLAMP B", kind: "model" },
+    clampC: { x: 660, y: 420, w: 140, h: 60, t: "CLAMP C", kind: "model" },
+    fc41d: OUTSIDE.fc41d, broker: OUTSIDE.broker, phone: OUTSIDE.phone,
+  };
+  for (let k = 0; k < 3; k++) COMP["bat" + (k + 1)] = { x: 1010, y: 110 + k * 120, w: 170, h: 90, t: `BATTERY ${k + 1}`, kind: "ext" };
+  POWER = { gridl: { d: "M230 530H930", c: "dis" } };
+  DATA = {
+    usart: { d: "M480 140H452V58H470", c: "uart" },
+    spi: { d: "M480 129H420", c: "i2c" },
+    adcA: { d: "M350 420V300H500V270", c: "ana" },
+    adcB: { d: "M540 420V270", c: "ana" },
+    adcC: { d: "M730 420V300H600V270", c: "ana" },
+    rfbroker: RF.rfbroker, rfphone: RF.rfphone,
+    rfbat1: { d: "M545 0C760 -20 930 40 1010 150", c: "rf", rf: true },
+    rfbat2: { d: "M545 0C800 0 940 150 1010 270", c: "rf", rf: true },
+    rfbat3: { d: "M545 0C830 20 950 260 1010 390", c: "rf", rf: true },
+  };
+  board(214, 44, 520, 270, "METER BOARD");
+  board(236, 400, 600, 100, "CURRENT CLAMPS · NOT MODELLED");
+  el("text", { class: "ext-lab", x: 230, y: 552 }, boardsDecor, "GRID");
+  el("text", { class: "ext-lab", x: 930, y: 552, "text-anchor": "end" }, boardsDecor, "HOUSE");
+  drawPaths();
+  Object.keys(COMP).forEach(comp);
+  chip("mcu", "CT002");
+  V.flash = valText("flash", 9, 34, "sub"); V.flash2 = valText("flash", 9, 46, "sub");
+  for (const k of ["A", "B", "C"]) { V["cl" + k] = valText("clamp" + k, 9, 36); V["cl" + k + "2"] = valText("clamp" + k, 9, 50, "sub"); }
+  for (let k = 1; k <= 3; k++) { V["bat" + k] = valText("bat" + k, 9, 38); V["bat" + k + "s"] = valText("bat" + k, 9, 56, "sub"); V["bat" + k + "t"] = valText("bat" + k, 9, 72, "sub"); }
+  V.fc = valText("fc41d", 9, 34, "sub");
+  V.broker = valText("broker", 9, 33, "sub"); V.phone = valText("phone", 9, 33, "sub");
+  silBox(487, 160, 156, 70, ["USART1 · SPI2 · ADC", "", "", "", "", ""], "mcu");
+  silBox(624, 10, 120, 24, ["", ""], "fc");
+  [["USART1 · AT", 412, 54], ["ADC", 520, 300]].forEach(([t, x, y]) => el("text", { class: "sil dim", x, y }, silG, t));
+}
+
+const LAYOUTS = {
+  "B2500": buildB2500, "Venus E 3.0": () => buildVenus("E3"), "Venus D": () => buildVenus("D"),
+  "Venus A": () => buildVenus("A"), "Jupiter C Plus": () => buildVenus("JP"), "Jupiter C/E": () => buildVenus("J"),
+  "Venus C/E": buildVenusCE, "CT002 / CT003": buildCt,
+};
+const IS_VENUS = (m) => m !== "B2500" && m !== "Venus C/E" && m !== "CT002 / CT003";
 
 /* ------------------------------------------------------------- capsules */
 const caps = [];
@@ -346,7 +506,18 @@ function capsuleFor(ev) {
       if (d === "inverter→control") return capsule("caninv", -1, label.slice(0, 10));
       if (d === "control→BMS") return capsule("canbms", 1, "poll");
       if (d === "BMS→control") return capsule("canbms", -1, "BMS");
+      if (d === "control→MPPT") return capsule("canmppt", 1, label.slice(0, 10));
+      if (d === "MPPT→control") return capsule("canmppt", -1, label.slice(0, 10));
       return;
+    }
+    case "LPUART1": {
+      const m = t.match(/^(?:AT\+)?(\+?[A-Z0-9]+)/);
+      return capsule("usart", d.startsWith("MCU") ? 1 : -1, m ? m[1].slice(0, 10) : "AT");
+    }
+    case "UDP": {
+      const mac = (t.match(/c8478c00aa0(\d)/) || [])[1];
+      if (!mac) return;
+      return capsule("rfbat" + mac, d === "battery→CT" ? -1 : 1, d === "battery→CT" ? "poll" : "answer");
     }
     case "I2C2": return capsule("i2c", -1, "CELL×14");
     case "BLE": return capsule("rfphone", 1, "BLE");
@@ -396,7 +567,10 @@ function animFlows(dtReal) {
 /* ---------------------------------------------------------- render svg */
 function render() {
   if (!SN) return;
-  if (MODEL === "B2500") renderB2500(); else renderVenus();
+  if (MODEL === "B2500") renderB2500();
+  else if (MODEL === "Venus C/E") renderCE();
+  else if (MODEL === "CT002 / CT003") { renderCt(); return; }
+  else renderVenus();
   $("shellSoc").textContent = Math.round(S.soc * 100) + "%";
   $("shellLed").setAttribute("stroke-dasharray", `${(138.2 * S.soc).toFixed(1)} 200`);
 }
@@ -431,8 +605,9 @@ function renderOutside(mq) {
   SIL.fc[0].textContent = "AT engine · " + String(SN.fc41d.version).slice(-12);
   SIL.fc[1].textContent = SN.fc41d.wifi ? `MQTT ${mq ? "up" : "down"} · BLE adv` : "Wi‑Fi disconnected";
 }
+const num = (v, d = 1) => (v == null || Number.isNaN(Number(v)) ? "–" : Number(v).toFixed(d));
 function renderVenus() {
-  const inv = SN.inverter, bms = SN.bms, mq = (SN.fc41d.mqtt || []).some((s) => s.connected);
+  const inv = SN.inverter, bms = SN.bms, mq = (SN.fc41d.mqtt || []).some((s) => s.connected), mp = SN.mppt;
   setFlow("bat", S.pbat, S.pbat >= 0 ? "chg" : "dis");
   setFlow("acl", S.ac, S.ac >= 0 ? "dis" : "chg");
   setFlow("gridl", S.grid, S.grid >= 0 ? "dis" : "sol");
@@ -441,27 +616,30 @@ function renderVenus() {
   V.mcuB.textContent = `${sgn(inv.reference)} W`;
   V.mcuC.textContent = "setpoint to inverter";
   V.mcuD.textContent = `IRQ ${(irq / 1000).toFixed(2)}k/s · CAN ${SN.can.frames}`;
-  V.eep.textContent = "settings and statistics";
-  V.rs.textContent = "slave 1, the firmware's";
-  V.rs2.textContent = "register map";
-  V.modbus.textContent = "Modbus TCP via";
-  V.modbus2.textContent = "marsemu --modbus-port";
+  if (V.eep) V.eep.textContent = "settings and statistics";
+  if (V.rs) {
+    V.rs.textContent = "slave 1, the firmware's"; V.rs2.textContent = "register map";
+    V.modbus.textContent = "Modbus TCP via"; V.modbus2.textContent = "marsemu --modbus-port";
+  }
+  if (mp && V.mppt) {
+    setFlow("pvin", sum(mp.pv));
+    setFlow("mpptbat", mp.dc);
+    V.mppt.textContent = `${Math.round(sum(mp.pv))} W PV`;
+    V.mppt2.textContent = `limit ${mp.limit} W · mode ${mp.mode}`;
+    V.mppt3.textContent = `into the pack ${Math.round(mp.dc)} W`;
+    for (let k = 0; k < 4; k++) V["str" + (k + 1)].textContent = `${Math.round(mp.pv[k])}/${Math.round(mp.avail[k])} W`;
+  }
   V.inv.textContent = `${sgn(inv.ac)} W AC`;
   V.invs.textContent = `reference ${sgn(inv.reference)} W · ${inv.connected ? "on grid" : "off grid"}`;
   V.invt.textContent = `DC ${sgn(inv.dc)} W into the pack`;
   V.invu.textContent = `limits ${inv.limit_discharge} / ${inv.limit_charge} W`;
   V.invv.textContent = `LLC ${inv.temp_llc} °C · bridge ${inv.temp_inv} °C`;
-  V.invw.textContent = `firmware v${inv.version} protocol (model)`;
+  V.invw.textContent = `v${inv.version} protocol (model)`;
   V.invx.textContent = inv.errors.some(Boolean) ? `errors ${inv.errors.map((e) => hex(e, 2)).join(" ")}` : "no errors";
   $("m-micro").classList.toggle("alarm", inv.errors.some(Boolean));
-  V.bms.textContent = `SOC ${Number(bms.soc).toFixed(1)} % · ${Number(bms.v).toFixed(2)} V`;
-  V.bms2.textContent = `${sgn(bms.a)} A · own process`;
-  const minC = Math.min(...S.cells), maxC = Math.max(...S.cells);
-  V.afe.textContent = `${(minC * 1000).toFixed(0)}–${(maxC * 1000).toFixed(0)} mV · Δ ${((maxC - minC) * 1000).toFixed(0)}`;
-  V.afe2.textContent = `${S.I >= 0 ? "+" : ""}${S.I.toFixed(2)} A · ${S.temp.toFixed(1)} °C`;
-  V.fets.textContent = `${S.fets.chg ? "CHG" : "chg"} · ${S.fets.dsg ? "DSG" : "dsg"}`;
-  V.fets.style.fill = S.fets.chg && S.fets.dsg ? "var(--ok)" : "var(--alarm)";
-  $("m-fets").classList.toggle("alarm", !(S.fets.chg && S.fets.dsg));
+  V.bms.textContent = `SOC ${num(bms.soc)} % · ${num(bms.v, 2)} V`;
+  V.bms2.textContent = `${bms.a == null ? "–" : sgn(bms.a)} A · ${bms.real ? (bms.process === "own process" ? "own process" : "real firmware") : "model"}`;
+  renderPackSide();
   renderOutside(mq);
   renderCells(3.15, 3.45);
   const m = SIL.mcu;
@@ -469,15 +647,87 @@ function renderVenus() {
   m[2].textContent = `IRQ  ${Math.round(irq)}/s  ${(SN.mcu.hz / 1e6).toFixed(0)} MHz`;
   m[3].textContent = `CAN  ${SN.can.frames} frames`;
   m[4].textContent = `→inv ${SN.can.by_dir["control→inverter"] || 0}  ←inv ${SN.can.by_dir["inverter→control"] || 0}`;
-  m[5].textContent = `→BMS ${SN.can.by_dir["control→BMS"] || 0}  ←BMS ${SN.can.by_dir["BMS→control"] || 0}`;
+  m[5].textContent = mp ? `→MPPT ${SN.can.by_dir["control→MPPT"] || 0}  ←BMS ${SN.can.by_dir["BMS→control"] || 0}`
+    : `→BMS ${SN.can.by_dir["control→BMS"] || 0}  ←BMS ${SN.can.by_dir["BMS→control"] || 0}`;
   const mi = SIL.micro;
   mi[1].textContent = `0x01 setpoint  ${Math.round(inv.reference)} W`;
   mi[2].textContent = `0x03/0x04 limits ${inv.discharge_limit_w}/${inv.charge_limit_w} W`;
   mi[3].textContent = `0x0A cut-off SOC ${inv.cutoff_soc} %`;
   mi[4].textContent = `work mode ${inv.work_mode} · max SOC ${inv.max_soc} %`;
   mi[5].textContent = `0x10 telemetry ${sgn(inv.ac)} W`;
-  SIL.bms[1].textContent = `chg ${bms.charge_v} V ${bms.charge_a} A · dis ${bms.discharge_a} A`;
-  SIL.afe[1].textContent = `flags ${hex(bms.flags, 2)} · prot ${hex(bms.protect, 8)}`;
+  SIL.bms[1].textContent = `chg ${num(bms.charge_v)} V ${num(bms.charge_a)} A · dis ${num(bms.discharge_a)} A`;
+  SIL.afe[1].textContent = `flags ${hex(bms.flags || 0, 2)} · prot ${hex(bms.protect || 0, 8)}`;
+}
+function renderPackSide() {
+  const minC = Math.min(...S.cells), maxC = Math.max(...S.cells);
+  V.afe.textContent = `${(minC * 1000).toFixed(0)}–${(maxC * 1000).toFixed(0)} mV · Δ ${((maxC - minC) * 1000).toFixed(0)}`;
+  V.afe2.textContent = `${S.I >= 0 ? "+" : ""}${S.I.toFixed(2)} A · ${S.temp.toFixed(1)} °C`;
+  V.fets.textContent = `${S.fets.chg ? "CHG" : "chg"} · ${S.fets.dsg ? "DSG" : "dsg"}`;
+  V.fets.style.fill = S.fets.chg && S.fets.dsg ? "var(--ok)" : "var(--alarm)";
+  $("m-fets").classList.toggle("alarm", !(S.fets.chg && S.fets.dsg));
+}
+function renderCE() {
+  const st = SN.stage, bms = SN.bms, mq = (SN.fc41d.mqtt || []).some((s) => s.connected);
+  const toHouse = -S.pbat;           // + while the pack discharges toward the house
+  setFlow("bat", S.pbat, S.pbat >= 0 ? "chg" : "dis");
+  for (const k of ["llcbus", "busbr", "brrel"]) setFlow(k, S.pbat, S.pbat >= 0 ? "chg" : "dis");
+  setFlow("acl", S.ac, S.ac >= 0 ? "dis" : "chg");
+  setFlow("gridl", S.grid, S.grid >= 0 ? "dis" : "sol");
+  const irq = sum((SN.mcu.irqs || []).map((x) => x[1]));
+  V.mcuA.textContent = `${SN.device_type || SN.profile}${SN.version ? " V" + SN.version : ""}`;
+  V.mcuB.textContent = `${sgn(st.ac_w)} W`;
+  V.mcuC.textContent = "AC power";
+  V.mcuD.textContent = `IRQ ${(irq / 1000).toFixed(1)}k/s · 30 kHz loop`;
+  V.relay.textContent = st.relay ? "closed · on the grid" : "open";
+  V.relay.style.fill = st.relay ? "var(--ok)" : "var(--fg-dim)";
+  V.bridge.textContent = `${sgn(st.ac_w)} W`;
+  V.bridge2.textContent = `${st.bridge ? "switching" : "off"} · peak ${num(st.i_peak_a, 2)} A`;
+  V.dcbus.textContent = `${num(st.vbus)} V`;
+  V.llc.textContent = `${sgn(toHouse)} W`;
+  V.llc2.textContent = `${st.llc ? "running" : "off"}${st.bypass ? " · bypass" : ""}`;
+  V.bms.textContent = `SOC ${num(bms.soc)} % · ${num(bms.v, 2)} V`;
+  V.bms2.textContent = `${bms.a == null ? "–" : sgn(bms.a)} A · own process`;
+  renderPackSide();
+  renderOutside(mq);
+  renderCells(3.15, 3.45);
+  const m = SIL.mcu;
+  m[1].textContent = `PC   ${hex(SN.mcu.pc, 8)}`;
+  m[2].textContent = `IRQ  ${Math.round(irq)}/s  ${(SN.mcu.hz / 1e6).toFixed(0)} MHz`;
+  m[3].textContent = `bus ${num(st.vbus)} V · relay ${st.relay ? 1 : 0}`;
+  m[4].textContent = `bridge ${st.bridge ? "on" : "off"} · LLC ${st.llc ? "on" : "off"}`;
+  m[5].textContent = `CAN ${SN.can.frames} frames`;
+  SIL.bms[1].textContent = `chg ${num(bms.charge_v)} V ${num(bms.charge_a)} A · dis ${num(bms.discharge_a)} A`;
+  SIL.afe[1].textContent = `flags ${hex(bms.flags || 0, 2)} · prot ${hex(bms.protect || 0, 8)}`;
+}
+function renderCt() {
+  const mq = (SN.fc41d.mqtt || []).some((s) => s.connected), me = SN.meter, bats = SN.batteries || [];
+  const irq = sum((SN.mcu.irqs || []).map((x) => x[1]));
+  V.mcuA.textContent = `${SN.device_type || SN.profile}${SN.version ? " V" + SN.version : ""}`;
+  V.mcuB.textContent = `${me.replies}`;
+  V.mcuC.textContent = "answers sent";
+  V.mcuD.textContent = `IRQ ${(irq / 1000).toFixed(2)}k/s · id ${me.id}`;
+  V.flash.textContent = "factory data:"; V.flash2.textContent = "certificate, key (empty)";
+  const last = me.last || [];
+  [["A", 4], ["B", 5], ["C", 6]].forEach(([k, i]) => { V["cl" + k].textContent = `${last[i] ?? 0} W`; V["cl" + k + "2"].textContent = "input not modelled"; });
+  for (let k = 1; k <= 3; k++) {
+    const b = bats[k - 1], on = !!b;
+    $("m-bat" + k).style.opacity = on ? 1 : .3;
+    V["bat" + k].textContent = on ? `${Math.round(b.w)} W` : "not polling";
+    V["bat" + k + "s"].textContent = on ? `${b.type} · phase ${b.phase}` : "";
+    V["bat" + k + "t"].textContent = on ? `${b.replies} answers` : "";
+  }
+  V.broker.textContent = mq ? "connected" : "offline";
+  V.phone.textContent = SN.fc41d.ble || "–";
+  V.fc.textContent = SN.fc41d.wifi ? `Wi‑Fi · UDP 12345 · ${mq ? "MQTT" : "no MQTT"}` : "no Wi‑Fi";
+  $("m-fc41d").classList.toggle("alarm", !SN.fc41d.wifi);
+  SIL.fc[0].textContent = "AT engine · " + String(SN.fc41d.version).slice(-12);
+  SIL.fc[1].textContent = me.socket ? "UDP service on port 12345" : "no UDP service yet";
+  const m = SIL.mcu;
+  m[1].textContent = `PC   ${hex(SN.mcu.pc, 8)}`;
+  m[2].textContent = `IRQ  ${Math.round(irq)}/s  ${(SN.mcu.hz / 1e6).toFixed(0)} MHz`;
+  m[3].textContent = `answers ${me.replies}`;
+  m[4].textContent = `last to ${last[3] || "–"}`;
+  m[5].textContent = `per phase ${last.slice(8, 11).join("/") || "–"}`;
 }
 function renderB2500() {
   const pvT = sum(S.pv), out = sum(S.out);
@@ -549,8 +799,20 @@ function renderB2500() {
 }
 
 /* ------------------------------------------------------------- HUD */
+function renderHudCt() {
+  const me = SN.meter, bats = SN.batteries || [], last = me.last || [];
+  const cell = (id, v, u, note, color) => { $(id).innerHTML = `${v}<u>${u}</u>`; $(id).style.color = color || ""; $(id + "N").textContent = note; };
+  cell("hGrid", last[7] ?? 0, "W", "total in the last answer (clamps not modelled)");
+  cell("hAc", sum(bats.map((b) => b.w)), "W", `reported by ${bats.length} batteries`, "var(--discharge)");
+  cell("hPv", me.replies, "", "answers to battery polls", "var(--xray)");
+  cell("hBat", last.slice(8, 11).join("/") || "–", "", "batteries per phase A/B/C");
+  cell("hSoc", last[12] ?? "–", "dBm", "RSSI the meter reports", "var(--xray)");
+}
 function renderHud() {
   if (!SN) return;
+  document.querySelectorAll(".hud small").forEach((e, k) => { e.textContent = (MODEL === "CT002 / CT003"
+    ? ["Grid (meter)", "Batteries deliver", "Answers", "Batteries per phase", "Wi‑Fi"] : ["Grid", "AC to house", "Solar", "Battery", "State of charge"])[k]; });
+  if (MODEL === "CT002 / CT003") { renderHudCt(); renderHudCommon(); return; }
   const g = S.grid;
   $("hGrid").innerHTML = `${sgn(g)}<u>W</u>`;
   $("hGrid").style.color = Math.abs(g) < 25 ? "var(--ok)" : g > 0 ? "var(--fg)" : "var(--solar)";
@@ -558,7 +820,7 @@ function renderHud() {
   $("hAc").innerHTML = `${Math.round(S.ac)}<u>W</u>`;
   $("hAcN").textContent = `${MODEL === "B2500" ? "reference" : "setpoint"} ${Math.round(S.target)} W`;
   $("hPv").innerHTML = `${Math.round(sum(S.pv))}<u>W</u>`;
-  $("hPvN").textContent = MODEL === "B2500" ? `${Math.round(S.pv[0])} + ${Math.round(S.pv[1])} W` : "no PV input";
+  $("hPvN").textContent = MODEL === "B2500" || SN.mppt ? S.pv.map((w) => Math.round(w)).filter((w, k) => k < 2 || w).join(" + ") + " W" : "no PV input";
   const b = S.pbat;
   $("hBat").innerHTML = `${sgn(b)}<u>W</u>`;
   $("hBat").style.color = Math.abs(b) < 3 ? "var(--fg-dim)" : b > 0 ? "var(--charge)" : "var(--discharge)";
@@ -566,6 +828,9 @@ function renderHud() {
   $("hSoc").innerHTML = `${(S.soc * 100).toFixed(1)}<u>%</u>`;
   const kwh = SN.pack.capacity_ah * S.packV / 1000;
   $("hSocN").textContent = `${S.packV.toFixed(2)} V · ${(S.soc * kwh).toFixed(2)} of ${kwh.toFixed(2)} kWh`;
+  renderHudCommon();
+}
+function renderHudCommon() {
   $("clock").firstChild.nodeValue = "T+" + fmtT(S.t);
   $("rate").textContent = SN.error ? "stopped: error" : !SN.running ? "paused" : `${SN.rate.toFixed(1)}× real time`;
   const set = (id, bad, txt) => { const c = $(id); c.classList.remove("off"); c.classList.toggle("bad", bad); c.lastChild.nodeValue = txt; };
@@ -573,13 +838,15 @@ function renderHud() {
   set("chipWifi", !SN.fc41d.wifi, SN.fc41d.wifi ? "Wi‑Fi" : "Wi‑Fi down");
   set("chipMqtt", !mq, mq ? "MQTT connected" : "MQTT offline");
   const ct = SN.ct, lost = S.f.ct || S.f.wifi || ct.age == null || ct.age > 10;
-  set("chipCt", lost, ct.age == null ? "CT002 waiting" : lost ? `CT002 lost ${ct.age.toFixed(0)} s` : `CT002 ${ct.age.toFixed(1)} s ago`);
+  if (MODEL === "CT002 / CT003") set("chipCt", !SN.meter.socket, SN.meter.socket ? "UDP 12345 open" : "no UDP service");
+  else set("chipCt", lost, ct.age == null ? "CT002 waiting" : lost ? `CT002 lost ${ct.age.toFixed(0)} s` : `CT002 ${ct.age.toFixed(1)} s ago`);
   set("chipBle", false, "BLE " + (SN.fc41d.ble || "–"));
   $("crumb").innerHTML = `${esc(SN.model)} <em>${esc(SN.device_type || "")}</em> · firmware <em>${esc(SN.version ? "V" + SN.version : "starting")}</em> · profile <em>${esc(SN.profile)}</em> · <span title="${esc(SN.image)}">${esc(SN.image.length > 28 ? SN.image.slice(0, 26) + "…" : SN.image)}</span>`;
   const stateTxt = SN.error ? "error" : SN.running ? "running" : "paused";
-  $("devB2500").classList.toggle("on", MODEL === "B2500"); $("devVenusE3").classList.toggle("on", MODEL === "Venus E 3.0");
-  $("devState").textContent = MODEL === "B2500" ? stateTxt : "ready";
-  $("devStateV").textContent = MODEL === "Venus E 3.0" ? stateTxt : "ready";
+  document.querySelectorAll(".dev[data-models]").forEach((d) => {
+    const on = d.dataset.models.split("|").includes(MODEL);
+    d.classList.toggle("on", on); d.lastElementChild.textContent = on ? stateTxt : "ready";
+  });
   $("playBtn").textContent = SN.running ? "❚❚" : "▶";
   $("playBtn").setAttribute("aria-label", SN.running ? "Pause" : "Run");
   document.querySelectorAll("[data-speed]").forEach((x) => x.setAttribute("aria-pressed", String(+x.dataset.speed === SN.speed)));
@@ -618,8 +885,40 @@ const DESC_V = {
   fets: ["Charge and discharge MOSFETs", "Switched by the BMS firmware. Off on protection.", "model"],
   pack: ["Battery pack", "16 LFP cells in series, 100 Ah. Cell model: OCV curve, resistance, polarisation, temperature.", "model"],
   house: DESC.house, ct: DESC.ct, broker: DESC.broker, phone: DESC.phone,
+  mppt: ["MPPT", "Model of the PV charge controller on the CAN bus: answers the control's polls with its status block and obeys its PV power limit and charge voltage. Its firmware is not emulated.", "model"],
+  string1: ["PV string 1", "Available power, set with the sun slider or a scenario.", "ext"], string2: ["PV string 2", "Available power, set with the sun slider or a scenario.", "ext"],
+  string3: ["PV string 3", "Available power (set through the API).", "ext"], string4: ["PV string 4", "Available power (set through the API).", "ext"],
+  relay: ["Grid relay", "Closed by the control firmware once the PLL has locked and the DC bus is up.", "model"],
+  bridge: ["Inverter bridge", "Driven by the control firmware's HRTIM at 30 kHz; its control loop runs in the firmware.", "model"],
+  dcbus: ["DC bus", "Between the LLC and the bridge, measured by the firmware's ADC. Capacitance estimated.", "model"],
+  llc: ["LLC converter", "The battery DC/DC, switched by the firmware's HRTIM. Ratio estimated.", "model"],
+  flash: ["SPI flash", "External NOR flash where a CT keeps its factory data (TLS certificate and key). Empty here: the module claims the certificates.", "model"],
+  clampA: ["Clamp A", "The current clamp on phase A. Not modelled: the meter measures 0 W.", "model"],
+  clampB: ["Clamp B", "The current clamp on phase B. Not modelled: the meter measures 0 W.", "model"],
+  clampC: ["Clamp C", "The current clamp on phase C. Not modelled: the meter measures 0 W.", "model"],
+  bat1: ["Battery 1", "A virtual battery that polls the meter over UDP every 2.7 s, as a real one does.", "ext"],
+  bat2: ["Battery 2", "A virtual battery that polls the meter over UDP every 2.7 s, as a real one does.", "ext"],
+  bat3: ["Battery 3", "A virtual battery that polls the meter over UDP every 2.7 s, as a real one does.", "ext"],
 };
-const CHMAP_V = { mcu: null, fc41d: ["UART6", "MQTT", "RF", "BLE"], micro: ["CAN"], bms: ["CAN", "ALARM"], afe: ["CAN"], pack: ["CAN", "ALARM"], fets: ["CAN", "ALARM"], eeprom: ["FW"], rs485: ["FW"], modbus: ["FW"], ct: ["RF"], broker: ["MQTT"], phone: ["BLE"], house: ["EVT"] };
+const TITLES = {
+  "Venus D": { afe: ["KA49503 battery front end", "Model of the pack's front end on the BMS's SPI bus: 16 cells, current, temperatures.", "model"],
+    micro: ["Inverter board", "Model of the inverter board (Micro 116 protocol): setpoint clamp, grid-connect delay, slew, losses.", "model"] },
+  "Venus A": { afe: ["SH36735 battery front end", "Model of the front end of the Venus A's BMS: 13 cells, with the bit-banged I2C EEPROM that holds the master marker.", "model"],
+    micro: ["Inverter board", "Model of the inverter board (Micro 1211, an NS800RT that is not emulated) with its four PV inputs and 1450 W limits.", "model"],
+    mppt: ["MPPT", "The four PV inputs of the Venus A's inverter board, modelled from what the control sends and parses.", "model"] },
+  "Jupiter C Plus": { mcu: ["N32G45x control", "Runs the unmodified Jupiter control firmware: Wi‑Fi, MQTT, BLE, the CT poll, steering, the MPPT and inverter commands.", "real"],
+    bms: ["C Plus BMS", "Runs the unmodified C Plus BMS firmware on a model of its board (the Venus D's front end and EEPROM). It answers the control's broadcast.", "real"],
+    afe: ["KA49503 battery front end", "Model of the C Plus BMS's front end: 16 cells, current, temperatures.", "model"],
+    micro: ["Inverter", "Model built from what the control sends and parses; the inverter firmware is not available.", "model"] },
+  "Jupiter C/E": { mcu: ["N32G45x control", "Runs the unmodified Jupiter control firmware: Wi‑Fi, MQTT, BLE, the CT poll, steering, the MPPT and inverter commands.", "real"],
+    bms: ["BMS model", "Answers the control's 0x305 poll with the Pylontech-style set. Its limits are simple rules (50 A, half above 95 % SOC), not firmware.", "model"],
+    afe: ["Front end", "Part of the BMS model.", "model"],
+    micro: ["Inverter", "Model built from what the control sends and parses; the inverter firmware is not available.", "model"] },
+  "Venus C/E": { mcu: ["STM32G474 control", "Runs the unmodified control firmware, power stage included: the 30 kHz control loop on the HRTIM, the PLL, the relays, the LLC and bridge, plus Wi‑Fi, MQTT, BLE, the CT poll and steering.", "real"] },
+  "CT002 / CT003": { mcu: ["STM32F0 meter", "Runs the unmodified CT firmware: answers the batteries' UDP polls, reports over MQTT and HTTP.", "real"] },
+};
+const CHMAP_V = { mcu: null, fc41d: ["UART6", "USART1", "LPUART1", "UDP", "MQTT", "RF", "BLE"], mppt: ["CAN"], relay: ["FW"], bridge: ["FW"], dcbus: ["FW"], llc: ["FW"],
+  flash: ["FW"], clampA: ["UDP"], clampB: ["UDP"], clampC: ["UDP"], bat1: ["UDP"], bat2: ["UDP"], bat3: ["UDP"], micro: ["CAN"], bms: ["CAN", "ALARM"], afe: ["CAN"], pack: ["CAN", "ALARM"], fets: ["CAN", "ALARM"], eeprom: ["FW"], rs485: ["FW"], modbus: ["FW"], ct: ["RF"], broker: ["MQTT"], phone: ["BLE"], house: ["EVT"] };
 const CHMAP = { mcu: null, fc41d: ["USART1", "MQTT", "RF", "BLE"], afe: ["I2C2", "ALARM"], pack: ["I2C2", "UART5", "ALARM"], fets: ["I2C2", "ALARM"], extp: ["UART5"], ct: ["RF"], broker: ["MQTT"], phone: ["BLE"], inv: ["FW", "EVT"], house: ["EVT"], out1: ["FW"], out2: ["FW"], pv1: ["FW", "EVT"], pv2: ["FW", "EVT"], panel1: ["EVT"], panel2: ["EVT"] };
 const BS1 = ["OV", "UV", "OCD1", "OCD2", "OCC", "SC", "PF", "WDT"], BS2 = ["UTC", "OTC", "UTD", "OTD"];
 function kv(rows) { return `<dl class="kv">${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>`; }
@@ -639,7 +938,7 @@ function flags(list) { return `<div class="flags">${list.map(([n, on, bad]) => `
 function inspector() {
   if (!SN) { $("ibody").innerHTML = '<div class="empty">Start a device to inspect it.</div>'; return; }
   const dd = MODEL === "B2500" ? DESC : DESC_V;
-  const d = dd[sel] || dd.mcu, kind = d[2], r = SN.mcu.regs || {};
+  const d = (TITLES[MODEL] || {})[sel] || dd[sel] || dd.mcu, kind = d[2], r = SN.mcu.regs || {};
   let h = `<div class="ititle"><div><h2>${d[0]}</h2><p>${d[1]}</p></div><span class="badge ${kind}">${kind === "real" ? "real firmware" : kind === "ext" ? "outside the box" : "model"}</span></div>`;
   if (MODEL !== "B2500") {
     h += inspectVenus();
@@ -708,8 +1007,45 @@ function inspector() {
   h += traffic(sel);
   $("ibody").innerHTML = h;
 }
+function inspectCt() {
+  const me = SN.meter, last = me.last || [];
+  if (sel === "mcu" || sel === "flash") {
+    return kv([["Image", esc(SN.image)], ["Profile", SN.profile], ["Firmware version", SN.version ? "V" + SN.version : "–"],
+      ["Device type", SN.device_type || "–"], ["Meter id (BLE MAC)", me.id], ["Answers sent", me.replies],
+      ["Clock", `${(SN.mcu.hz / 1e6).toFixed(0)} MHz`], ["Program counter", hex(SN.mcu.pc, 8)]])
+      + regs((SN.mcu.irqs || []).map(([n, rt]) => [n, rt.toFixed(0) + " /s", ""]), "Interrupts", "per emulated second")
+      + (last.length ? regs([["model", last[0]], ["meter", last[1]], ["to", `${last[2]} ${last[3]}`], ["A / B / C", `${last[4]} / ${last[5]} / ${last[6]} W`],
+        ["total", `${last[7]} W`], ["batteries A/B/C/?", last.slice(8, 12).join(" / ")], ["RSSI", last[12]], ["fields 13–", last.slice(13).join(" ")]], "Last answer", "relay mode") : "");
+  }
+  if (sel.startsWith("bat")) {
+    const b = (SN.batteries || [])[+sel.slice(3) - 1];
+    if (!b) return '<div class="empty">Not polling. Raise "Batteries polling the meter".</div>';
+    return kv([["Device type", b.type], ["MAC", b.mac], ["Phase", b.phase], ["Reports", `${Math.round(b.w)} W`], ["Answers", b.replies]])
+      + (b.last ? regs([["A / B / C", `${b.last[4]} / ${b.last[5]} / ${b.last[6]} W`], ["batteries per phase", b.last.slice(8, 11).join(" / ")]], "Its last answer", "") : "");
+  }
+  if (sel.startsWith("clamp")) return kv([["Measured", "0 W (not modelled)"], ["In the answers", `${last[{ clampA: 4, clampB: 5, clampC: 6 }[sel]] ?? 0} W`]]);
+  if (sel === "fc41d") return kv([["Module firmware", esc(SN.fc41d.version)], ["Wi‑Fi", SN.fc41d.wifi ? "connected" : "disconnected"], ["UDP service", me.socket ? "port 12345" : "not open yet"], ["BLE name", esc(SN.fc41d.ble || "–")], ["Command topic", esc(SN.sub_topic || "–")]]);
+  if (sel === "broker") { const s0 = (SN.fc41d.mqtt || [])[0]; return kv([["Session", s0 ? `${s0.connected ? "connected" : "closed"} · ${esc(s0.host)}:${s0.port}` : "none"]]); }
+  return "";
+}
+function inspectCE() {
+  const st = SN.stage;
+  if (sel === "relay" || sel === "bridge" || sel === "dcbus" || sel === "llc") {
+    return kv([["AC power", sgn(st.ac_w) + " W"], ["Battery power", sgn(st.bat_w) + " W"], ["DC bus", `${num(st.vbus)} V`],
+      ["Grid relay", st.relay ? "closed" : "open"], ["Bridge", st.bridge ? "switching" : "off"], ["LLC", st.llc ? "running" : "off"],
+      ["Bypass", st.bypass ? "closed" : "open"], ["Peak current", `${num(st.i_peak_a, 2)} A`]]);
+  }
+  return null;
+}
 function inspectVenus() {
+  if (MODEL === "CT002 / CT003") return inspectCt();
+  if (MODEL === "Venus C/E") { const r = inspectCE(); if (r != null) return r; }
   const inv = SN.inverter, bms = SN.bms;
+  if (sel === "mppt" || sel.startsWith("string")) {
+    const mp = SN.mppt;
+    return kv([["PV harvested", `${Math.round(sum(mp.pv))} W`], ...mp.pv.map((w, k) => [`String ${k + 1}`, `${Math.round(w)} of ${Math.round(mp.avail[k])} W`]),
+      ["PV limit from the control", `${mp.limit} W`], ["Into the pack", `${Math.round(mp.dc)} W`], ["Mode", mp.mode], ["Protocol", "v" + mp.version]]);
+  }
   if (sel === "mcu") {
     return kv([["Image", esc(SN.image)], ["Profile", SN.profile], ["Firmware version", SN.version ? "V" + SN.version : "not reported yet"],
       ["Device type", SN.device_type || "–"], ["Clock", `${(SN.mcu.hz / 1e6).toFixed(0)} MHz · ${(SN.mcu.cycles / 1e6).toFixed(1)} M cycles`],
@@ -717,6 +1053,7 @@ function inspectVenus() {
       + regs((SN.mcu.irqs || []).map(([n, rt]) => [n, rt.toFixed(0) + " /s", ""]), "Interrupts", "per emulated second")
       + regs(Object.entries(SN.can.by_dir).map(([k, v]) => [k, v, "frames"]), "CAN traffic", `${SN.can.frames} frames`);
   }
+  if (sel === "micro" && SN.stage) return inspectCE();
   if (sel === "micro") {
     return kv([["AC power", sgn(inv.ac) + " W"], ["Reference", sgn(inv.reference) + " W"], ["DC into the pack", sgn(inv.dc) + " W"],
       ["On the grid", inv.connected ? "yes" : "no"], ["Allowed now", `${inv.limit_discharge} W out · ${-inv.limit_charge} W in`],
@@ -726,7 +1063,8 @@ function inspectVenus() {
   }
   if (sel === "bms" || sel === "afe" || sel === "pack" || sel === "fets") {
     const mn = Math.min(...S.cells), mx = Math.max(...S.cells), mos = bms.mos || {};
-    return kv([["BMS image", esc(bms.image)], ["Runs", bms.process], ["SOC (BMS)", Number(bms.soc).toFixed(1) + " %"],
+    const packs = (SN.packs || []).length > 1 ? regs(SN.packs.map((p, k) => [`pack ${k + 1}`, `${p.soc} %`, `${p.v} V · ${p.a} A · ${p.mos.charge ? "C" : "-"}${p.mos.discharge ? "D" : "-"}`]), "Packs in the stack", "") : "";
+    return packs + kv([["BMS image", esc(bms.image || "none (model)")], ["Runs", bms.process], ["SOC (BMS)", num(bms.soc) + " %"],
       ["SOC (pack model)", (S.soc * 100).toFixed(2) + " %"], ["Pack", `${S.packV.toFixed(2)} V · ${S.I.toFixed(2)} A · ${Math.round(S.pbat)} W`],
       ["Charge to", `${bms.charge_v} V at ${bms.charge_a} A`], ["Discharge up to", `${bms.discharge_a} A`],
       ["Cell spread", `${((mx - mn) * 1000).toFixed(0)} mV`], ["Temperature", S.temp.toFixed(1) + " °C"],
@@ -771,7 +1109,7 @@ svg.addEventListener("keydown", (e) => {
 /* ------------------------------------------------------------ console */
 const LOG = []; const LOGMAX = 600;
 let CHANNELS = ["FW", "I2C2", "USART1", "UART5", "MQTT", "RF", "BLE", "EVT", "ALARM"];
-const shown = new Set(["FW", "I2C2", "USART1", "UART5", "UART6", "CAN", "MQTT", "RF", "BLE", "EVT", "ALARM"]);
+const shown = new Set(["FW", "I2C2", "USART1", "UART5", "UART6", "LPUART1", "CAN", "UDP", "MQTT", "RF", "BLE", "EVT", "ALARM"]);
 let logDirty = true;
 function log(ch, dir, text, t) {
   LOG.push({ t: t ?? S.t, ch, dir, text });
@@ -953,7 +1291,12 @@ function bind(id, out, fmt, send) {
   i.addEventListener("input", () => { $(out).textContent = fmt(+i.value); debounced(id, () => send(+i.value)); });
 }
 bind("sLoad", "oLoad", (v) => v + " W", (v) => control({ op: "load", w: v }));
-const sendPv = () => control({ op: "pv", w: [+$("sPv1").value, +$("sPv2").value] });
+const sendPv = () => {
+  const rest = SN && SN.mppt ? SN.mppt.avail.slice(2) : [];
+  control({ op: "pv", w: [+$("sPv1").value, +$("sPv2").value, ...rest] });
+};
+bind("sBats", "oBats", (v) => String(v), (v) => control({ op: "batteries", n: v }));
+bind("sBatW", "oBatW", (v) => v + " W", (v) => control({ op: "battery_w", w: v }));
 bind("sPv1", "oPv1", (v) => v + " W", sendPv);
 bind("sPv2", "oPv2", (v) => v + " W", sendPv);
 bind("sAmb", "oAmb", (v) => v + " °C", (v) => control({ op: "ambient", c: v }));
@@ -961,9 +1304,14 @@ function syncSliders() {
   if (!SN) return;
   const put = (id, out, v, fmt) => { const i = $(id); if (document.activeElement !== i && !timers[id + "busy"]) { i.value = v; $(out).textContent = fmt(v); } };
   put("sLoad", "oLoad", Math.round(SN.load), (v) => v + " W");
-  if (SN.pv) {
-    put("sPv1", "oPv1", Math.round(SN.pv[0].avail), (v) => v + " W");
-    put("sPv2", "oPv2", Math.round(SN.pv[1].avail), (v) => v + " W");
+  const avail = SN.pv ? SN.pv.map((p) => p.avail) : SN.mppt ? SN.mppt.avail : null;
+  if (avail) {
+    put("sPv1", "oPv1", Math.round(avail[0]), (v) => v + " W");
+    put("sPv2", "oPv2", Math.round(avail[1]), (v) => v + " W");
+  }
+  if (SN.batteries) {
+    put("sBats", "oBats", SN.batteries.length, (v) => String(v));
+    if (SN.batteries[0]) put("sBatW", "oBatW", Math.round(SN.batteries[0].w), (v) => v + " W");
   }
   put("sAmb", "oAmb", Math.round(SN.ambient), (v) => v + " °C");
 }
@@ -987,7 +1335,7 @@ const TRACE = [
 ];
 const TRACE_V = [
   { h: "The CT002 measures the grid", p: () => `At the meter the house draws ${Math.round(S.load)} W and the battery delivers ${Math.round(S.ac)} W, so the grid shows ${sgn(S.grid)} W.`, hl: ["m-ct", "gridl", "m-house"], sel: "ct" },
-  { h: "The control asks the meter", p: () => `The control MCU sends AT+QISEND to the Wi‑Fi module on UART6, which sends a UDP poll to the meter. ${SN.ct.polls} polls so far.`, hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfct", "m-ct"], sel: "fc41d", go: () => capsule("usart", 1, "QISEND") },
+  { h: "The control asks the meter", p: () => `The control MCU sends AT+QISEND to the Wi‑Fi module on ${SN.fc41d.uart}, which sends a UDP poll to the meter. ${SN.ct.polls} polls so far.`, hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfct", "m-ct"], sel: "fc41d", go: () => capsule("usart", 1, "QISEND") },
   { h: "The meter answers over Wi‑Fi", p: () => `The last answer said ${SN.ct.last_grid == null ? "nothing yet" : sgn(SN.ct.last_grid) + " W on phase A"}.`, hl: ["m-ct", "rfct", "ant", "m-fc41d", "usart", "m-mcu"], sel: "fc41d", go: () => capsule("rfct", -1, SN.ct.last_grid == null ? "reply" : `A ${sgn(SN.ct.last_grid)} W`) },
   { h: "The control firmware decides", p: () => `This is the real firmware. Its setpoint for the inverter right now: ${sgn(SN.inverter.reference)} W (positive: deliver, negative: charge from the grid).`, hl: ["m-mcu"], sel: "mcu" },
   { h: "The setpoint goes over CAN", p: () => `Function 0x01 to the inverter board, which clamps it to what the BMS allows (${SN.inverter.limit_discharge} W out, ${-SN.inverter.limit_charge} W in) and echoes it.`, hl: ["m-mcu", "caninv", "canbus", "m-micro"], sel: "micro", go: () => capsule("caninv", 1, "setpoint") },
@@ -997,7 +1345,24 @@ const TRACE_V = [
 ];
 let tri = -1;
 const dotsEl = $("trDots");
-const traceSteps = () => (MODEL === "B2500" ? TRACE : TRACE_V);
+const TRACE_CE = [
+  { h: "The CT002 measures the grid", p: () => `At the meter the house draws ${Math.round(S.load)} W and the device delivers ${Math.round(S.ac)} W: the grid shows ${sgn(S.grid)} W.`, hl: ["m-ct", "gridl", "m-house"], sel: "ct" },
+  { h: "The control asks the meter", p: () => `AT+QISEND on LPUART1 to the Wi‑Fi module, which sends a UDP poll. ${SN.ct.polls} polls so far.`, hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfct", "m-ct"], sel: "fc41d", go: () => capsule("usart", 1, "QISEND") },
+  { h: "The meter answers", p: () => `The last answer said ${SN.ct.last_grid == null ? "nothing yet" : sgn(SN.ct.last_grid) + " W"}.`, hl: ["m-ct", "rfct", "ant", "m-fc41d", "usart", "m-mcu"], sel: "fc41d", go: () => capsule("rfct", -1, "reply") },
+  { h: "One MCU decides and drives", p: () => "Real firmware: the same STM32G474 that runs the steering runs the 30 kHz control loop of the power stage.", hl: ["m-mcu"], sel: "mcu" },
+  { h: "The bridge and the relay", p: () => `The HRTIM switches the inverter bridge (${SN.stage.bridge ? "switching" : "off"}); the grid relay is ${SN.stage.relay ? "closed" : "open"}.`, hl: ["m-mcu", "hrtimb", "gpio", "m-bridge", "m-relay"], sel: "bridge" },
+  { h: "The LLC and the DC bus", p: () => `The LLC moves power between the pack and the DC bus (${num(SN.stage.vbus)} V), which the ADC measures.`, hl: ["m-mcu", "hrtiml", "adc", "m-llc", "m-dcbus"], sel: "llc" },
+  { h: "AC reaches the house", p: () => `${sgn(S.ac)} W AC; the grid at the meter moves toward 0 W (now ${sgn(S.grid)} W).`, hl: ["m-relay", "acl", "m-house", "gridl", "m-ct"], sel: "house" },
+  { h: "The pack and its BMS", p: () => `${S.pbat >= 0 ? "Into" : "Out of"} the pack: ${Math.abs(Math.round(S.pbat))} W. The BMS firmware reports over CAN from its own process.`, hl: ["bat", "llcbus", "m-fets", "m-afe", "m-bms", "canbms", "spi", "sense", "cells"], sel: "pack" },
+];
+const TRACE_CT = [
+  { h: "A battery polls the meter", p: () => `Every 2.7 s each battery sends a UDP poll to port 12345 with its phase and the power it delivers. ${(SN.batteries || []).length} are polling.`, hl: ["m-bat1", "rfbat1", "ant", "m-fc41d"], sel: "bat1", go: () => capsule("rfbat1", -1, "poll") },
+  { h: "The module hands it over", p: () => "The Wi‑Fi module passes the datagram to the meter's MCU on USART1 (+QIURC, then AT+QIRD).", hl: ["m-fc41d", "usart", "m-mcu"], sel: "fc41d", go: () => capsule("usart", -1, "+QIURC") },
+  { h: "The firmware answers", p: () => `Real firmware: grid per phase (0 W, the clamps are not modelled), the total, how many batteries report on each phase (${((SN.meter.last || []).slice(8, 11).join("/")) || "–"}), its RSSI.`, hl: ["m-mcu", "m-clampA", "m-clampB", "m-clampC", "adcA", "adcB", "adcC"], sel: "mcu" },
+  { h: "The answer goes back", p: () => `AT+QISEND, then UDP to the battery. ${SN.meter.replies} answers so far.`, hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfbat1", "m-bat1"], sel: "bat1", go: () => capsule("rfbat1", 1, "answer") },
+  { h: "It reports to the cloud stand-in", p: () => "Over MQTT and HTTP the meter reports what it measures and how many batteries it serves; marsemu answers both locally.", hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfbroker", "m-broker"], sel: "broker" },
+];
+const traceSteps = () => (MODEL === "B2500" ? TRACE : MODEL === "Venus C/E" ? TRACE_CE : MODEL === "CT002 / CT003" ? TRACE_CT : TRACE_V);
 function traceGo(i) {
   const TR = traceSteps();
   if (!SN || i < 0 || i >= TR.length) return traceEnd();
@@ -1041,8 +1406,16 @@ document.addEventListener("keydown", (e) => {
 const LEGENDS = {
   "B2500": [["solar", "PV"], ["charge", "into the pack"], ["discharge", "toward the house"], ["i2c", "I2C2"], ["uart", "USART1"], ["ext", "UART5"], ["analog", "PWM / DAC / ADC"], ["rf", "Wi‑Fi / BLE"]],
   "Venus E 3.0": [["charge", "into the pack"], ["discharge", "toward the house"], ["ext", "CAN"], ["uart", "UART6"], ["i2c", "I2C / SPI"], ["analog", "RS485"], ["rf", "Wi‑Fi / BLE"]],
+  "Venus D": [["solar", "PV"], ["charge", "into the pack"], ["discharge", "toward the house"], ["ext", "CAN"], ["uart", "UART6"], ["i2c", "I2C / SPI"], ["analog", "RS485"], ["rf", "Wi‑Fi / BLE"]],
+  "Jupiter C/E": [["solar", "PV"], ["charge", "into the pack"], ["discharge", "toward the house"], ["ext", "CAN"], ["uart", "USART1"], ["i2c", "SPI"], ["rf", "Wi‑Fi / BLE"]],
+  "Venus C/E": [["charge", "into the pack"], ["discharge", "toward the house"], ["ext", "FDCAN"], ["uart", "LPUART1"], ["analog", "HRTIM / ADC / GPIO"], ["i2c", "SPI"], ["rf", "Wi‑Fi / BLE"]],
+  "CT002 / CT003": [["uart", "USART1"], ["i2c", "SPI flash"], ["analog", "ADC (clamps)"], ["rf", "Wi‑Fi: UDP, MQTT, BLE"]],
 };
-const SHELL = { "B2500": ["B2500", "2.24 kWh · 800 W"], "Venus E 3.0": ["VENUS E", "5.12 kWh · 2.5 kW"] };
+LEGENDS["Venus A"] = LEGENDS["Venus D"]; LEGENDS["Jupiter C Plus"] = LEGENDS["Jupiter C/E"];
+const SHELL = { "B2500": ["B2500", "2.24 kWh · 800 W"], "Venus E 3.0": ["VENUS E", "5.12 kWh · 2.5 kW"],
+  "Venus D": ["VENUS D", "2.2 kW · 4 MPPT"], "Venus A": ["VENUS A", "1.45 kW · 4 MPPT"], "Venus C/E": ["VENUS", "5.12 kWh · 2.5 kW"],
+  "Jupiter C/E": ["JUPITER", "inverter · MPPT · pack"], "Jupiter C Plus": ["JUPITER C+", "inverter · MPPT · pack"],
+  "CT002 / CT003": ["CT002", "smart meter"] };
 function buildLayout(model, channels) {
   if (!LAYOUTS[model]) model = "B2500";
   traceEnd();
@@ -1051,9 +1424,13 @@ function buildLayout(model, channels) {
   LAYOUTS[model]();
   $("legend").innerHTML = LEGENDS[model].map(([c, t]) => `<span><i style="background:var(--${c})"></i>${t}</span>`).join("");
   $("shellName").textContent = SHELL[model][0]; $("shellSub").textContent = SHELL[model][1];
-  document.querySelectorAll(".only-b2500").forEach((e) => { e.hidden = model !== "B2500"; });
-  document.querySelectorAll(".only-venus").forEach((e) => { e.hidden = model === "B2500"; });
-  $("houseHead").textContent = model === "B2500" ? "House and sun" : "House";
+  const pv = model === "B2500" || !!(SN && SN.mppt), ct = model === "CT002 / CT003";
+  document.querySelectorAll(".only-pv").forEach((e) => { e.hidden = !pv; });
+  document.querySelectorAll(".only-nopv").forEach((e) => { e.hidden = pv || ct; });
+  document.querySelectorAll(".only-ct").forEach((e) => { e.hidden = !ct; });
+  document.querySelectorAll(".only-house").forEach((e) => { e.hidden = ct; });
+  $("houseHead").textContent = ct ? "Batteries" : pv ? "House and sun" : "House";
+  $("scStep").hidden = ct; $("fHot").parentElement.hidden = ct; $("fCt").parentElement.hidden = ct;
   if (channels) buildFilters(channels);
   sel = "mcu";
   const e = $("m-mcu"); if (e) e.classList.add("sel");
@@ -1081,8 +1458,17 @@ function renderImages() {
     const pick = bmss.find((b) => b.name === cur) || bmss.find((b) => /bms/i.test(b.name)) || bmss[0];
     if (pick) $("bmsSel").value = pick.name;
   }
-  const b2500 = !ch || ch.model === "B2500";
-  $("oPvA").parentElement.hidden = !b2500; $("oPvB").parentElement.hidden = !b2500;
+  const optBms = !!(ch && ch.bms_optional);
+  if (optBms) {
+    $("bmsPick").hidden = false;
+    const cur = $("bmsSel").value;
+    $("bmsSel").innerHTML = '<option value="">none: the BMS model</option>' + bmss.map((b) => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join("");
+    if (bmss.some((b) => b.name === cur)) $("bmsSel").value = cur;
+  }
+  const pvIn = !ch || ch.pv_inputs > 0, ct = !!(ch && ch.model === "CT002 / CT003");
+  $("oPvA").parentElement.hidden = !pvIn; $("oPvB").parentElement.hidden = !pvIn;
+  $("oLoadS").parentElement.hidden = ct; $("oSoc").parentElement.hidden = ct;
+  $("lPacks").hidden = !(ch && ch.packs); $("lBats").hidden = !ct;
   $("startBtn").disabled = !chosen || (needBms && !bmss.length);
   $("drop").hidden = !canUpload;
 }
@@ -1108,8 +1494,9 @@ $("startBtn").addEventListener("click", async () => {
   $("startErr").textContent = ""; $("startBtn").disabled = true; $("startBtn").textContent = "Starting…";
   try {
     const ch = images.find((i) => i.name === chosen);
-    await post("api/start", { image: chosen, bms: ch && ch.needs_bms ? $("bmsSel").value : undefined,
-      pv: [+$("oPvA").value, +$("oPvB").value], load: +$("oLoadS").value, soc: +$("oSoc").value });
+    await post("api/start", { image: chosen, bms: ch && (ch.needs_bms || ch.bms_optional) ? $("bmsSel").value || undefined : undefined,
+      pv: [+$("oPvA").value, +$("oPvB").value], load: +$("oLoadS").value, soc: +$("oSoc").value,
+      packs: ch && ch.packs ? +$("oPacks").value : undefined, batteries: ch && ch.model === "CT002 / CT003" ? +$("oBats2").value : undefined });
   } catch (e) { $("startErr").textContent = e.message; }
   $("startBtn").disabled = !chosen; $("startBtn").textContent = "Start";
 });

@@ -25,19 +25,22 @@ data from the running firmware:
   CT002 offline, pack over-temperature), a status poll (`cd=1`), pause, step
   and a speed limit.
 
-Two devices for now:
+Every device marsemu models. Pick the image on the start screen; devices
+with a BMS image of their own take it too.
 
-- **B2500** (every image `marsemu info` reports as `b2500-v1`, `-v2` or `-v3`):
-  the one MCU, the SH367309 front end and 14 cells, both PV inputs, both
-  outputs and the microinverter, extension packs on UART5.
-- **Venus E 3.0** (a `venus3` control image for the E 3.0, plus its BMS
-  image): the control and the BMS firmware (the BMS in its own process), the
-  KA495XX front end and 16 cells, and the inverter board model. The internal
-  CAN bus is decoded: setpoints and limits to the inverter board, its
-  replies, and the BMS's voltage, current, SOC, limits, protection, cells and
-  temperatures.
+| Device | Images | What the view shows |
+|---|---|---|
+| **B2500** | one (`b2500-v1`, `-v2`, `-v3`) | the one MCU, the SH367309 front end and 14 cells, both PV inputs and outputs, the microinverter, extension packs on UART5 |
+| **Venus E 3.0** | control (`venus3`, VNSE3) + BMS | control and BMS firmware (the BMS in its own process), the KA495XX and 16 cells, the inverter board model, EEPROM, RS485 |
+| **Venus D** | control (VNSD) + BMS | as the E 3.0, plus the MPPT model with four PV strings; stacked packs (`packs` on the start screen) |
+| **Venus A** | control (VNSA) + BMS | the SH36735 front end and 13 cells, the inverter with its four PV inputs; stacked packs |
+| **Jupiter C/E, C Plus** | control (`jupiter`), BMS optional | the inverter and MPPT models; the C Plus's real BMS firmware with its image, else the BMS model (Pylontech-style frames) |
+| **Venus C/E** | control (`venus`, HMG) + BMS | the control MCU runs the power stage itself: the LLC, the DC bus, the bridge and the grid relay it drives, the BMS firmware on CAN. It runs at about a sixth of real time |
+| **CT002 / CT003** | one (`ct00x`) | the meter's firmware answering virtual batteries that poll it over UDP (how many, and what power they report, are controls). Its current clamps are not modelled, so it measures 0 W |
 
-The other devices follow.
+On every CAN device the internal bus is decoded: setpoints and limits to
+the inverter, its replies, the MPPT's status, and what the BMS reports
+(voltage, current, SOC, limits, protection, cells, temperatures).
 
 ## Running it
 
@@ -94,11 +97,12 @@ prefix (Home Assistant's ingress).
 |---|---|
 | `GET api/state` | The firmware images and, while a device runs, its latest snapshot |
 | `GET api/stream` | Server-sent events: `hello` (the state) once, then `tick` four times a second with the snapshot, new bus messages and new chart samples |
-| `POST api/control` | A command for the running device, e.g. `{"op": "load", "w": 800}`, `{"op": "pv", "w": [300, 200]}`, `{"op": "fault", "name": "wifi", "on": true}`, `{"op": "mqtt", "payload": "cd=1"}`, `{"op": "speed", "x": 0}`, `{"op": "pause", "on": true}`, `{"op": "step", "s": 1}`, `{"op": "scenario", "name": "cloud"}` |
+| `POST api/control` | A command for the running device, e.g. `{"op": "load", "w": 800}`, `{"op": "pv", "w": [300, 200]}`, `{"op": "fault", "name": "wifi", "on": true}`, `{"op": "mqtt", "payload": "cd=1"}`, `{"op": "speed", "x": 0}`, `{"op": "pause", "on": true}`, `{"op": "step", "s": 1}`, `{"op": "scenario", "name": "cloud"}`; for the CT `{"op": "batteries", "n": 2}` and `{"op": "battery_w", "w": 300}` |
 | `POST api/firmware?name=FILE` | Save the request body as a firmware image |
-| `POST api/start` | `{"image": "FILE", "pv": [W, W], "load": W, "soc": %}`; a Venus also takes `"bms": "FILE"` |
+| `POST api/start` | `{"image": "FILE", "pv": [W, W], "load": W, "soc": %}`; devices with a BMS image take `"bms": "FILE"`, the Venus D and A `"packs": N`, the CT `"batteries": N` |
 | `POST api/stop` | Stop the device |
 
-From Python, `marsemu.ui.session.B2500Session` and `VenusE3Session` are the
-same devices without the web server: `command()` takes the same commands and `read()` returns the
+From Python, the classes in `marsemu.ui.session` (`B2500Session`,
+`VenusE3Session`, `VenusDSession`, `VenusASession`, `JupiterSession`,
+`VenusCESession`, `CtSession`) are the same devices without the web server: `command()` takes the same commands and `read()` returns the
 same snapshot.
