@@ -30,7 +30,9 @@ work the same way.
 Give each device its phase and run them together, so
 they share one emulated timeline (lockstep slices of a few milliseconds) and
 see one grid. Two devices built from the same image need their own identity
-(MCU UID, module MAC and IP), or the meter cannot tell them apart:
+(MCU UID, the module's Wi-Fi and BLE MACs, and IP), or the meter cannot tell
+them apart. A Venus names itself in its CT polls by the BLE MAC, so two Venus
+left on the default BLE MAC look like one battery to the meter:
 
 ```python
 from marsemu import VenusD, VenusE3, House, connect_house, run_together
@@ -38,7 +40,8 @@ from marsemu.fc41d.module import Fc41dConfig
 
 def ident(n):
     return {"uid": bytes([n] * 12),
-            "fc41d": Fc41dConfig(wifi_mac=f"c8:47:8c:00:{n:02x}:01", ip=f"192.168.1.{50 + n}")}
+            "fc41d": Fc41dConfig(wifi_mac=f"c8:47:8c:00:{n:02x}:01", ble_mac=f"c8:47:8c:00:{n:02x}:02",
+                                 ip=f"192.168.1.{50 + n}")}
 
 d = VenusD(D_CONTROL, D_BMS, pv=[750, 750], control_kwargs=ident(1))
 e = VenusE3(E_CONTROL, E_BMS, control_kwargs=ident(2))
