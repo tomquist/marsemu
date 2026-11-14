@@ -283,3 +283,10 @@ discharge sums, the energy fields) except:
 * **A battery that goes quiet.** The firmware still counted the silent battery,
   with its last reported power, when it came back 40 s later. AstraMeter's
   adaptive eviction drops it after about two of its poll periods.
+
+Against CT003 V122, the same 589 polls agree on the same fields, with the same
+two differences. The CT003's reply also has 28 fields, not 24. Fields 25–28
+are the P1 meter's tariff energy registers (`1.8.1`, `1.8.2`, `2.8.1`,
+`2.8.2`), in units of 0.1 Wh: 1234.567 kWh is sent as 12345670. AstraMeter
+leaves these four fields empty, because it has no smart meter to read them
+from.
