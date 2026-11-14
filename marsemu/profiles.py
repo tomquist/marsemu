@@ -301,9 +301,16 @@ def ct_spi_flash(emu) -> None:
         spi.device = SpiNorFlash(emu.machine)
 
 
+def ct_meter_chip(emu) -> None:
+    """CT002 (HME-4): the BL09xx metering chip on bit-banged SPI (GPIOA PA4-PA7).
+    Its registers start at 0, i.e. no load on any clamp."""
+    from .periph.bl_spi import attach_ct_meter
+    attach_ct_meter(emu)
+
+
 register(Profile(
     "ct00x", "CT002/CT003 smart meter (HME-x), STM32F0-class Cortex-M0", soc="stm32f0", hz=48_000_000,
-    flash_kb=128, sram_kb=16, device_type="HME-4", fc41d_uart="USART1", setup=[ct_spi_flash, preloaded_module_certs],
+    flash_kb=128, sram_kb=16, device_type="HME-4", fc41d_uart="USART1", setup=[ct_spi_flash, preloaded_module_certs, ct_meter_chip],
     notes="USART2 is a debug console that also echoes AT commands"))
 def control_eeprom(emu) -> None:
     """Venus control boards keep their settings in a 24Cxx EEPROM at 0x50 on I2C1
