@@ -1174,6 +1174,9 @@ class Iwdg(Base):
 
     def _expire(self) -> None:
         self.ev = None
+        if self.m.feeding_watchdog():
+            # asleep in a loop that reloads the watchdog on every iteration
+            self.last_kick = self.m.clock.cycles
         due = self.last_kick + self.timeout_cycles()
         if due > self.m.clock.cycles:
             self.ev = self.m.clock.at(due, self._expire, "iwdg")

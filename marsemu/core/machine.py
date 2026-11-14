@@ -77,7 +77,8 @@ class Machine:
         self._reset_req: Optional[str] = None
         self._sleeping = False
         self.exc_count = 0           # exceptions taken (for the idle-loop check)
-        self._idle_mark = -1
+        #: heads of wait loops that reload the IWDG every iteration (see set_idle_loop)
+        self.watchdog_waits: set = set()
         self._idle_stop = False
         self.idle_sleeps = 0
         self.reset_count = 0
@@ -224,19 +225,33 @@ class Machine:
         self.uc.ctl_flush_tb()
         return h
 
-    def set_idle_loop(self, addr: int) -> None:
-        """Treat reaching ``addr`` (the head of the RTOS idle loop) like WFI.
+    def set_idle_loop(self, addr: int, feeds_watchdog: bool = False) -> None:
+        """Treat reaching ``addr`` (the head of an idle or wait loop) like WFI.
 
         The first arrival after an exception lets one iteration run; arriving
         again with no exception in between means the iteration neither
-        yielded nor was interrupted, so the CPU sleeps until the next event."""
+        yielded nor was interrupted, so the CPU sleeps until the next event.
+        Each loop keeps its own mark, so leaving one loop for another never
+        skips the other's first iteration.
+
+        ``feeds_watchdog``: the loop reloads the IWDG on every iteration, so a
+        watchdog that expires while the CPU sleeps there counts as reloaded
+        (see :attr:`watchdog_waits`)."""
+        mark = [-1]
+
         def hit(m):
-            if m._idle_mark == m.exc_count and not m.nvic.pend_set:
+            if mark[0] == m.exc_count and not m.nvic.pend_set:
                 m._idle_stop = True
                 m.uc.emu_stop()
             else:
-                m._idle_mark = m.exc_count
+                mark[0] = m.exc_count
+        if feeds_watchdog:
+            self.watchdog_waits.add(addr)
         self.add_code_hook(addr, hit)
+
+    def feeding_watchdog(self) -> bool:
+        """Asleep in a loop that reloads the watchdog on every iteration."""
+        return self._sleeping and bool(self.watchdog_waits) and self.pc in self.watchdog_waits
 
     # ---------------------------------------------------------------- reset
     def reset(self) -> None:

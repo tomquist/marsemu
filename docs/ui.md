@@ -67,9 +67,9 @@ install it.
 ## Speed
 
 A B2500 runs at about 3–4× real time on a desktop computer once it has
-booted. During its first seconds, the firmware services its watchdog in a
-tight loop, which is slow to emulate: expect about half a minute before the
-device is online. A Raspberry Pi is several times slower.
+booted; its first 10 seconds are busier and take about 15 s. It is online
+(Wi‑Fi, MQTT, CT002) after about 20 s of emulated time. A Raspberry Pi is
+several times slower.
 
 ## API
 

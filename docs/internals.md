@@ -20,7 +20,11 @@ and bare-metal loops run unmodified. Details that matter:
   1 on the Venus E 3.0/A/D control, as on its cached flash). `core/ucount.py`
   finds Unicorn's instruction counter with a self-calibrating probe. WFI and the
   FreeRTOS idle loop (`analysis/idle.py`) fast-forward to the next event, which
-  makes mostly idle firmware 3–6× faster.
+  makes mostly idle firmware 3–6× faster. So do delay loops that only reload
+  the watchdog while they wait for a tick counter in RAM (the B2500's
+  `delay_ms()`): such a loop can only end after an interrupt, and a watchdog
+  that expires while the CPU sleeps there counts as reloaded. Loops that poll a
+  peripheral are left alone.
 * **FPU state survives nesting.** Exception return restores CONTROL.FPCA from
   EXC_RETURN, as the hardware does; otherwise a handler preempted inside FP
   code loses its condition flags.
