@@ -818,7 +818,8 @@ function renderHud() {
   $("hGrid").style.color = Math.abs(g) < 25 ? "var(--ok)" : g > 0 ? "var(--fg)" : "var(--solar)";
   $("hGridN").textContent = Math.abs(g) < 25 ? "balanced" : g > 0 ? "import from grid" : "export to grid";
   $("hAc").innerHTML = `${Math.round(S.ac)}<u>W</u>`;
-  $("hAcN").textContent = `${MODEL === "B2500" ? "reference" : "setpoint"} ${Math.round(S.target)} W`;
+  $("hAcN").textContent = MODEL === "Venus C/E" ? `bridge ${SN.stage.bridge ? "switching" : "off"} · relay ${SN.stage.relay ? "closed" : "open"}`
+    : `${MODEL === "B2500" ? "reference" : "setpoint"} ${Math.round(S.target)} W`;
   $("hPv").innerHTML = `${Math.round(sum(S.pv))}<u>W</u>`;
   $("hPvN").textContent = MODEL === "B2500" || SN.mppt ? S.pv.map((w) => Math.round(w)).filter((w, k) => k < 2 || w).join(" + ") + " W" : "no PV input";
   const b = S.pbat;
@@ -1049,7 +1050,7 @@ function inspectVenus() {
   if (sel === "mcu") {
     return kv([["Image", esc(SN.image)], ["Profile", SN.profile], ["Firmware version", SN.version ? "V" + SN.version : "not reported yet"],
       ["Device type", SN.device_type || "–"], ["Clock", `${(SN.mcu.hz / 1e6).toFixed(0)} MHz · ${(SN.mcu.cycles / 1e6).toFixed(1)} M cycles`],
-      ["Program counter", hex(SN.mcu.pc, 8)], ["Setpoint to the inverter", sgn(inv.reference) + " W"]])
+      ["Program counter", hex(SN.mcu.pc, 8)], SN.stage ? ["AC power (its own bridge)", sgn(SN.stage.ac_w) + " W"] : ["Setpoint to the inverter", sgn(inv.reference) + " W"]])
       + regs((SN.mcu.irqs || []).map(([n, rt]) => [n, rt.toFixed(0) + " /s", ""]), "Interrupts", "per emulated second")
       + regs(Object.entries(SN.can.by_dir).map(([k, v]) => [k, v, "frames"]), "CAN traffic", `${SN.can.frames} frames`);
   }

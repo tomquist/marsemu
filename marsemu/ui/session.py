@@ -902,6 +902,10 @@ class VenusCESession(CanBoardSession):
         self.stage = dev.stage
         return dev
 
+    def _battery_w(self) -> float:
+        # the pack sees the power stage's current in bursts: its average is the battery power
+        return self.stage.p_bat_avg
+
     def _device_snapshot(self) -> dict:
         st = self.stage.status()
         bms = self._bms_snapshot()
