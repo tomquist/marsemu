@@ -1440,6 +1440,7 @@ function buildLayout(model, channels) {
 
 /* ------------------------------------------------------- start screen */
 let images = [], chosen = null, canUpload = true;
+let bmsFor = null;   // the control image the BMS choice was made for
 function renderImages() {
   const box = $("imgs");
   const devs = images.filter((i) => i.role !== "bms"), bmss = images.filter((i) => i.role === "bms");
@@ -1456,7 +1457,12 @@ function renderImages() {
     const cur = $("bmsSel").value;
     $("bmsSel").innerHTML = bmss.length ? bmss.map((b) => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join("")
       : '<option value="">add the BMS image too</option>';
-    const pick = bmss.find((b) => b.name === cur) || bmss.find((b) => /bms/i.test(b.name)) || bmss[0];
+    // a newly chosen control image gets the BMS image of its own model (VNSD-0 with VNSD-0)
+    const tag = (chosen.match(/[A-Z]{3,}\d*-\d+/) || [])[0];
+    const own = tag && bmss.find((b) => b.name.includes(tag));
+    const keep = chosen === bmsFor && bmss.find((b) => b.name === cur);
+    const pick = keep || own || bmss.find((b) => /bms/i.test(b.name)) || bmss[0];
+    bmsFor = chosen;
     if (pick) $("bmsSel").value = pick.name;
   }
   const optBms = !!(ch && ch.bms_optional);
@@ -1473,7 +1479,7 @@ function renderImages() {
   $("startBtn").disabled = !chosen || (needBms && !bmss.length);
   $("drop").hidden = !canUpload;
 }
-function showStart(on) { $("start").hidden = !on; if (on) { traceEnd(); renderImages(); } }
+function showStart(on) { $("start").hidden = !on; document.body.classList.toggle("starting", on); if (on) { traceEnd(); renderImages(); } }
 async function upload(file) {
   $("startErr").textContent = "";
   try {

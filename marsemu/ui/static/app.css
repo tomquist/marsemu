@@ -235,9 +235,10 @@ table.regs td:first-child{color:var(--xray)}
 @media (prefers-reduced-motion:reduce){ .tog input::after,.tog input{transition:none} }
 
 /* start screen */
-.start{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;padding:16px;
+/* centred with margin:auto, so a card taller than the view scrolls from its top */
+.start{position:absolute;inset:0;z-index:5;display:flex;align-items:flex-start;justify-content:center;padding:16px;
   background:radial-gradient(800px 400px at 50% 40%,rgba(142,241,255,.06),transparent 70%),rgba(5,9,14,.92);overflow:auto}
-.start .card{width:min(640px,100%);display:flex;flex-direction:column;gap:14px;background:var(--panel);border:1px solid var(--line-2);border-radius:4px;padding:18px}
+.start .card{margin:auto;width:min(640px,100%);display:flex;flex-direction:column;gap:14px;background:var(--panel);border:1px solid var(--line-2);border-radius:4px;padding:18px}
 .start h2{margin:0;font:600 20px var(--f-label)}
 .start p{margin:0;color:var(--fg-dim);font-size:13px;max-width:62ch}
 .imgs{display:flex;flex-direction:column;gap:4px;max-height:220px;overflow:auto}
@@ -259,3 +260,10 @@ table.regs td:first-child{color:var(--xray)}
 @media (max-width:720px){.opts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .bmspick{display:flex;flex-direction:column;gap:4px;font:500 12px var(--f-label);color:var(--fg-dim)}
 .bmspick select{background:var(--bg-2);border:1px solid var(--line-2);border-radius:3px;padding:6px 8px;font:500 12px var(--f-mono)}
+/* on a narrow screen the picture is too small to hold the card: the card takes its place
+   and the page scrolls */
+@media (max-width:1180px){
+  body.starting .stage .svgwrap{aspect-ratio:auto}
+  body.starting #stage{display:none}
+  body.starting .start{position:relative;inset:auto}
+}
