@@ -857,6 +857,7 @@ def test_ui_ct_session_answers_batteries():
     assert [int(v) for v in snap["meter"]["last"][4:8]] == [-100, -100, 200, 0]
 
 
+@pytest.mark.firmware
 def test_ui_ct003_session_reads_the_p1_meter():
     """The CT003 is a P1 reader: once its P1 line idles high it reads the
     utility meter's telegrams on USART3 and answers the batteries with them."""
