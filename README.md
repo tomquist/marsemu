@@ -20,9 +20,9 @@ Modbus integration.
 
 ![A B2500 booting in the marsemu dashboard](docs/images/boot-b2500.webp)
 
-*A B2500 (HMA-1, firmware V232) booting in the [dashboard](#dashboard): it
-starts its peripherals, joins Wi‑Fi, finds its CT002, connects to MQTT and
-steers the grid to 0 W. The slow parts are sped up, as labelled.*
+*A B2500 (HMA-1, firmware V232) booting in the [dashboard](#dashboard), in the
+device's real time: it starts its peripherals, joins Wi‑Fi, finds its CT002,
+connects to MQTT and steers the grid to 0 W within a minute.*
 
 > marsemu is an independent project, not affiliated with or endorsed by Hame or
 > Marstek. It ships no firmware: you run your device's own firmware. See
