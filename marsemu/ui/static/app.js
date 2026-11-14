@@ -1,0 +1,879 @@
+/* marsemu dashboard: the X-ray view of a running device, fed by api/stream. */
+(() => {
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const $ = (id) => document.getElementById(id);
+const svg = $("stage");
+const css = getComputedStyle(document.documentElement);
+const C = (n) => css.getPropertyValue("--" + n).trim();
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function el(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const sum = (a) => a.reduce((x, y) => x + y, 0);
+const pad = (n, w) => String(n).padStart(w, "0");
+const hex = (n, w = 0) => "0x" + (n >>> 0).toString(16).toUpperCase().padStart(w, "0");
+const sgn = (w) => (w >= 0 ? "+" : "−") + Math.abs(Math.round(w));
+function fmtT(t) {
+  const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
+  return `${pad(h, 2)}:${pad(m, 2)}:${s.toFixed(1).padStart(4, "0")}`;
+}
+function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+async function post(url, body, raw) {
+  const r = await fetch(url, { method: "POST", body: raw ? body : JSON.stringify(body || {}), headers: raw ? {} : { "Content-Type": "application/json" } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `${r.status} ${r.statusText}`);
+  return j;
+}
+function control(cmd) { return post("api/control", cmd).catch((e) => log("EVT", "", "control failed: " + e.message)); }
+
+/* the device as the drawing sees it, from the latest snapshot */
+const CELLS = 14;
+let SN = null;                       // raw snapshot
+const S = {
+  t: 0, load: 0, sun: [0, 0], pv: [0, 0], pvV: [0, 0], out: [0, 0], outV: [0, 0], outA: [0, 0], target: 0, ac: 0, grid: 0,
+  pbat: 0, packV: 0, I: 0, soc: 0, cells: new Array(CELLS).fill(3.3), bal: new Array(CELLS).fill(false),
+  fets: { chg: true, dsg: true }, temp: 22, hs: 25, f: { wifi: false, ct: false, heat: false }, ext: [],
+};
+function fromSnap(sn) {
+  SN = sn;
+  S.t = sn.t; S.load = sn.load; S.grid = sn.grid; S.ac = sn.ac;
+  S.sun = sn.pv.map((p) => p.avail); S.pv = sn.pv.map((p) => p.w); S.pvV = sn.pv.map((p) => p.v);
+  S.out = sn.out.map((o) => o.w); S.outV = sn.out.map((o) => o.v); S.outA = sn.out.map((o) => o.a);
+  S.target = sum(sn.out.map((o) => (o.on ? o.i_lim * (o.v || 35) : 0)));
+  S.pbat = sn.pack.w; S.packV = sn.pack.v; S.I = sn.pack.a; S.soc = sn.pack.soc / 100;
+  S.cells = sn.pack.cells.map((v) => v / 1000);
+  S.bal = S.cells.map((_, i) => !!(sn.afe.bal & (1 << i)));
+  S.fets = { dsg: !!(sn.afe.fets & 1), chg: !!(sn.afe.fets & 2) };
+  S.temp = sn.pack.temp; S.hs = sn.heatsink; S.f = sn.faults; S.ext = sn.ext || [];
+}
+/* ------------------------------------------------------------ the drawing */
+const COMP = {
+  pv1: { x: 230, y: 80, w: 150, h: 86, t: "PV 1 · BUCK + MPPT", kind: "model" },
+  pv2: { x: 230, y: 210, w: 150, h: 86, t: "PV 2 · BUCK + MPPT", kind: "model" },
+  mcu: { x: 480, y: 120, w: 170, h: 150, t: "N32G452 · CORTEX-M4F", kind: "real" },
+  fc41d: { x: 470, y: 36, w: 150, h: 44, t: "FC41D · WI-FI + BLE", kind: "model" },
+  out1: { x: 770, y: 80, w: 160, h: 86, t: "OUT 1 · CURRENT SOURCE", kind: "model" },
+  out2: { x: 770, y: 210, w: 160, h: 86, t: "OUT 2 · CURRENT SOURCE", kind: "model" },
+  afe: { x: 255, y: 368, w: 150, h: 56, t: "SH367309 · FRONT END", kind: "model" },
+  fets: { x: 535, y: 368, w: 80, h: 44, t: "CHG · DSG", kind: "model" },
+  inv: { x: 1010, y: 140, w: 160, h: 130, t: "MICROINVERTER", kind: "ext" },
+  house: { x: 1030, y: 400, w: 120, h: 70, t: "HOUSE", kind: "ext" },
+  ct: { x: 1040, y: 540, w: 100, h: 50, t: "CT002 METER", kind: "ext" },
+  panel1: { x: 30, y: 80, w: 140, h: 86, t: "PANEL 1", kind: "ext" },
+  panel2: { x: 30, y: 210, w: 140, h: 86, t: "PANEL 2", kind: "ext" },
+  extp: { x: 30, y: 470, w: 140, h: 100, t: "EXTENSION PACK 1", kind: "ext" },
+  broker: { x: 975, y: -32, w: 110, h: 44, t: "MQTT BROKER", kind: "ext" },
+  phone: { x: 1100, y: -32, w: 90, h: 44, t: "PHONE · BLE", kind: "ext" },
+};
+const POWER = {
+  pv1in: { d: "M170 123H230", c: "sol" }, pv2in: { d: "M170 253H230", c: "sol" },
+  pv1bus: { d: "M380 123H410V340", c: "sol" }, pv2bus: { d: "M380 253H410V340", c: "sol" },
+  busL: { d: "M410 340H575", c: "sol" }, busR: { d: "M575 340H740", c: "dis" },
+  bat: { d: "M575 340V470", c: "chg" },
+  o1: { d: "M740 340V123H770", c: "dis" }, o2: { d: "M740 340V253H770", c: "dis" },
+  o1inv: { d: "M930 123H985V175H1010", c: "dis" }, o2inv: { d: "M930 253H985V235H1010", c: "dis" },
+  acl: { d: "M1090 270V400", c: "dis" }, gridl: { d: "M1090 650V470", c: "dis" },
+};
+const DATA = {
+  usart: { d: "M480 140H452V58H470", c: "uart" },
+  i2c: { d: "M520 270V300H330V368", c: "i2c" },
+  uart5: { d: "M630 270V318H222V520H170", c: "ext" },
+  pwm1: { d: "M480 175H395V150H380", c: "ana" }, pwm2: { d: "M480 230H395V275H380", c: "ana" },
+  dac1: { d: "M650 175H755V150H770", c: "ana" }, dac2: { d: "M650 230H755V275H770", c: "ana" },
+  gate: { d: "M405 396H535", c: "i2c" },
+  rfbroker: { d: "M545 0C700 -44 880 -46 975 -12", c: "rf", rf: true },
+  rfphone: { d: "M545 0C760 -70 1010 -70 1100 -14", c: "rf", rf: true },
+  rfct: { d: "M545 0C1040 -20 1215 250 1140 562", c: "rf", rf: true },
+};
+const P = {}; // path elements by key
+const tracksG = $("tracks"), flowsG = $("flows"), compsG = $("comps"), capsG = $("caps"), senseG = $("sense"), cellsG = $("cellsG"), silG = $("silicon");
+
+for (const [k, f] of Object.entries(POWER)) {
+  el("path", { d: f.d, class: "track hx", "data-k": k, "stroke-width": 7 }, tracksG);
+  const halo = el("path", { d: f.d, class: `halo c-${f.c} hx`, "data-k": k }, flowsG);
+  const flow = el("path", { d: f.d, class: `flow c-${f.c} hx`, "data-k": k }, flowsG);
+  P[k] = { flow, halo, len: flow.getTotalLength(), c: f.c, w: 0, off: 0, dir: 1 };
+}
+for (const [k, f] of Object.entries(DATA)) {
+  const p = el("path", { d: f.d, class: (f.rf ? "rftrack " : `dtrack c-${f.c} `) + "hx", "data-k": k }, tracksG);
+  P[k] = { path: p, len: p.getTotalLength(), c: f.c };
+}
+// antenna
+el("path", { d: "M545 36V0", stroke: "var(--rf)", "stroke-width": 1.4, fill: "none", class: "hx", "data-k": "ant" }, tracksG);
+el("path", { d: "M537 6l8 -8l8 8", stroke: "var(--rf)", "stroke-width": 1.2, fill: "none" }, tracksG);
+
+// AFE sense lines to every cell
+const CX0 = 262, CW = 40, CG = 6.3;
+for (let i = 0; i <= CELLS; i++) {
+  const x = i < CELLS ? CX0 + i * (CW + CG) + 4 : CX0 + (CELLS - 1) * (CW + CG) + CW - 4;
+  const ax = 268 + i * 9;
+  el("path", { d: `M${ax} 424V446L${x} 474`, fill: "none", stroke: "var(--i2c)", "stroke-opacity": .22, "stroke-width": .8, class: "hx", "data-k": "sense" }, senseG);
+}
+
+const V = {}; // live text nodes
+function comp(key) {
+  const c = COMP[key];
+  const g = el("g", { class: "comp hx", "data-mod": key, id: "m-" + key, tabindex: 0, role: "button", "aria-label": c.t }, compsG);
+  el("rect", { class: "box", x: c.x, y: c.y, width: c.w, height: c.h, rx: 5 }, g);
+  el("text", { class: "lab", x: c.x + 9, y: c.y + 15 }, g, c.t);
+  if (c.kind === "real") {
+    el("rect", { x: c.x + 9, y: c.y + 21, width: 66, height: 12, rx: 2, fill: "rgba(142,241,255,.12)", stroke: "rgba(142,241,255,.5)", "stroke-width": .6 }, g);
+    el("text", { class: "tag real", x: c.x + 42, y: c.y + 29.5, "text-anchor": "middle" }, g, "REAL FIRMWARE");
+  }
+  return { g, c };
+}
+function valText(key, dx, dy, cls = "val", anchor = "start") {
+  const c = COMP[key];
+  return el("text", { class: cls, x: c.x + dx, y: c.y + dy, "text-anchor": anchor }, $("m-" + key));
+}
+["pv1", "pv2", "out1", "out2", "mcu", "fc41d", "afe", "fets", "inv", "house", "ct", "panel1", "panel2", "extp", "broker", "phone"].forEach(comp);
+// panels: draw the PV grid
+for (const k of ["panel1", "panel2"]) {
+  const c = COMP[k], g = $("m-" + k);
+  for (let r = 0; r < 3; r++) for (let q = 0; q < 6; q++)
+    el("rect", { x: c.x + 10 + q * 20.5, y: c.y + 24 + r * 15, width: 18.5, height: 13, fill: "#0e1d33", stroke: "#1f3656", "stroke-width": .6 }, g);
+  V[k] = el("text", { class: "sub", x: c.x + c.w - 8, y: c.y + 15, "text-anchor": "end", style: "fill:var(--solar)" }, g, "");
+}
+// MCU chip: pins
+{
+  const c = COMP.mcu, g = $("m-mcu");
+  for (let i = 0; i < 10; i++) {
+    el("rect", { x: c.x + 14 + i * 14.5, y: c.y - 5, width: 6, height: 5, fill: "#2a3d52" }, g);
+    el("rect", { x: c.x + 14 + i * 14.5, y: c.y + c.h, width: 6, height: 5, fill: "#2a3d52" }, g);
+  }
+  for (let i = 0; i < 9; i++) {
+    el("rect", { x: c.x - 5, y: c.y + 14 + i * 14.5, width: 5, height: 6, fill: "#2a3d52" }, g);
+    el("rect", { x: c.x + c.w, y: c.y + 14 + i * 14.5, width: 5, height: 6, fill: "#2a3d52" }, g);
+  }
+  el("rect", { x: c.x + 40, y: c.y + 40, width: 90, height: 76, rx: 3, fill: "#0b1520", stroke: "#2b4258" }, g);
+  el("circle", { cx: c.x + 50, cy: c.y + 50, r: 2.5, fill: "#2b4258" }, g);
+  V.mcuA = el("text", { class: "sub", x: c.x + 85, y: c.y + 68, "text-anchor": "middle" }, g, "HMJ-2 V116");
+  V.mcuB = el("text", { class: "val", x: c.x + 85, y: c.y + 89, "text-anchor": "middle", style: "font-size:13px" }, g, "");
+  V.mcuC = el("text", { class: "sub", x: c.x + 85, y: c.y + 105, "text-anchor": "middle" }, g, "");
+  V.mcuD = el("text", { class: "sub", x: c.x + 9, y: c.y + c.h - 9 }, g, "");
+}
+V.pv1 = valText("pv1", 9, 42); V.pv1s = valText("pv1", 9, 58, "sub"); V.pv1t = valText("pv1", 9, 74, "sub");
+V.pv2 = valText("pv2", 9, 42); V.pv2s = valText("pv2", 9, 58, "sub"); V.pv2t = valText("pv2", 9, 74, "sub");
+V.out1 = valText("out1", 9, 42); V.out1s = valText("out1", 9, 58, "sub"); V.out1t = valText("out1", 9, 74, "sub");
+V.out2 = valText("out2", 9, 42); V.out2s = valText("out2", 9, 58, "sub"); V.out2t = valText("out2", 9, 74, "sub");
+V.fc = valText("fc41d", 9, 34, "sub");
+V.afe = valText("afe", 9, 33, "sub"); V.afe2 = valText("afe", 9, 47, "sub");
+V.fets = valText("fets", 40, 33, "sub", "middle");
+V.inv = valText("inv", 9, 50); V.invs = valText("inv", 9, 68, "sub"); V.invt = valText("inv", 9, 84, "sub"); V.invu = valText("inv", 9, 100, "sub");
+V.house = valText("house", 9, 44); V.houses = valText("house", 9, 60, "sub");
+V.ct = valText("ct", 9, 37, "sub");
+V.extp = valText("extp", 9, 44); V.extps = valText("extp", 9, 60, "sub"); V.extpt = valText("extp", 9, 76, "sub");
+V.broker = valText("broker", 9, 33, "sub"); V.phone = valText("phone", 9, 33, "sub");
+el("text", { class: "ext-lab", x: 1090, y: 672, "text-anchor": "middle" }, compsG, "GRID");
+el("path", { d: "M1078 668l12 -18l12 18M1082 662h16", stroke: "var(--fg-faint)", fill: "none" }, compsG);
+
+// cells
+const CELL = [];
+for (let i = 0; i < CELLS; i++) {
+  const x = CX0 + i * (CW + CG), y = 474, h = 98;
+  const g = el("g", { class: "comp hx", "data-mod": "pack", "data-cell": i }, cellsG);
+  el("rect", { x, y, width: CW, height: h, rx: 3, fill: "#0c1622", stroke: "#25384c" }, g);
+  el("rect", { x: x + 12, y: y - 4, width: 6, height: 4, fill: "#3a5068" }, g);
+  el("rect", { x: x + 22, y: y - 4, width: 6, height: 4, fill: "#3a5068" }, g);
+  const fill = el("rect", { x: x + 3, y: y + 3, width: CW - 6, height: h - 6, rx: 2, fill: "var(--charge)", "fill-opacity": .16 }, g);
+  const lvl = el("rect", { x: x + 3, y: y + 3, width: CW - 6, height: 2, fill: "var(--charge)" }, g);
+  const num = el("text", { x: x + CW / 2, y: y + h - 8, "text-anchor": "middle", class: "sub", style: "font-size:8.5px" }, g, String(i + 1));
+  const balDot = el("circle", { cx: x + CW / 2, cy: y + 14, r: 3, fill: "var(--warn)", opacity: 0 }, g);
+  const hot = el("rect", { x: x - 1, y: y - 1, width: CW + 2, height: h + 2, rx: 4, fill: "none", stroke: "var(--alarm)", "stroke-width": 1.6, opacity: 0 }, g);
+  CELL.push({ fill, lvl, num, balDot, hot, x, y, h });
+}
+
+// silicon layer: register readouts next to the parts
+const SIL = {};
+function silBox(x, y, w, h, lines, key) {
+  el("rect", { class: "silbox", x, y, width: w, height: h, rx: 2 }, silG);
+  SIL[key] = lines.map((txt, i) => el("text", { class: "sil" + (i === 0 ? " dim" : ""), x: x + 6, y: y + 12 + i * 11 }, silG, txt));
+}
+silBox(487, 160, 156, 70, ["USART1 · I2C2 · UART5 · TIM8/TIM2 · DAC", "", "", "", "", ""], "mcu");
+silBox(236, 128, 140, 38, ["TIM8 CH3 / CH4 · ADC1 ch3", "", ""], "pv1");
+silBox(236, 258, 140, 38, ["TIM2 CH4 / CH3 · ADC2 ch5", "", ""], "pv2");
+silBox(776, 128, 150, 38, ["DAC ch1 · ADC1 ch6 / ch1", "", ""], "out1");
+silBox(776, 258, 150, 38, ["DAC ch2 · ADC1 ch7 / ch2", "", ""], "out2");
+silBox(260, 330, 140, 34, ["SH367309 regs", "", ""], "afe");
+silBox(624, 10, 120, 24, ["", ""], "fc");
+const cellSil = [];
+for (let i = 0; i < CELLS; i++) {
+  const x = CX0 + i * (CW + CG) + CW / 2;
+  cellSil.push(el("text", { class: "sil", x, y: 500, "text-anchor": "middle", style: "font-size:8px" }, silG, ""));
+  cellSil.push(el("text", { class: "sil dim", x, y: 512, "text-anchor": "middle", style: "font-size:7.5px" }, silG, ""));
+}
+// bus labels on silicon layer
+[["USART1 · AT", 412, 54], ["I2C2", 450, 296], ["UART5 · 0x73", 300, 314], ["PWM refs", 400, 170], ["DAC", 700, 170]].forEach(([t, x, y]) =>
+  el("text", { class: "sil dim", x, y }, silG, t));
+
+/* ------------------------------------------------------------- capsules */
+const caps = [];
+const lastCap = {};
+const CAPCOL = { uart: "uart", i2c: "i2c", ext: "ext", rf: "rf", ana: "analog" };
+function capsule(pathKey, dir, label) {
+  if (reduced || caps.length > 24 || document.hidden) return;
+  const p = P[pathKey];
+  if (!p || !p.path) return;
+  const now = performance.now();
+  if (now - (lastCap[pathKey + dir] || 0) < 220) return;
+  lastCap[pathKey + dir] = now;
+  const g = el("g", { class: "cap" }, capsG);
+  const w = label.length * 5.2 + 10;
+  el("rect", { x: -w / 2, y: -7, width: w, height: 14, rx: 3, fill: `var(--${CAPCOL[p.c]})`, stroke: "rgba(0,0,0,.35)" }, g);
+  el("text", { x: 0, y: 3, "text-anchor": "middle" }, g, label);
+  caps.push({ g, p, dir, born: now, dur: p.len > 500 ? 1500 : p.len > 150 ? 1050 : 800 });
+}
+function capsuleFor(ev) {
+  const t = ev.text || "", d = ev.dir || "";
+  switch (ev.ch) {
+    case "USART1": {
+      const m = t.match(/^(?:AT\+)?(\+?[A-Z0-9]+)/);
+      return capsule("usart", d.startsWith("MCU") ? 1 : -1, m ? m[1].slice(0, 10) : "AT");
+    }
+    case "RF":
+      if (d === "FC41D→CT002") return capsule("rfct", 1, t.includes("no answer") ? "poll ✕" : "UDP poll");
+      if (d === "CT002→FC41D") return capsule("rfct", -1, t.split("  ")[0]);
+      return;
+    case "MQTT":
+      if (d === "broker→FC41D") return capsule("rfbroker", -1, (t.split("  ")[1] || "msg").slice(0, 12));
+      return capsule("rfbroker", 1, t.startsWith("subscribe") ? "SUB" : t.startsWith("connected") ? "CONN" : "PUB");
+    case "UART5": return capsule("uart5", 1, "0x73");
+    case "I2C2": return capsule("i2c", -1, "CELL×14");
+    case "BLE": return capsule("rfphone", 1, "BLE");
+  }
+}
+function animCaps(now) {
+  for (let i = caps.length - 1; i >= 0; i--) {
+    const c = caps[i];
+    const u = (now - c.born) / c.dur;
+    if (u >= 1) { c.g.remove(); caps.splice(i, 1); continue; }
+    const e = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    const s = c.dir > 0 ? e : 1 - e;
+    const pt = c.p.path.getPointAtLength(s * c.p.len);
+    c.g.setAttribute("transform", `translate(${pt.x.toFixed(1)},${pt.y.toFixed(1)})`);
+    c.g.setAttribute("opacity", u < .08 ? u / .08 : u > .9 ? (1 - u) / .1 : 1);
+  }
+}
+
+/* ------------------------------------------------------------ flows */
+function setFlow(k, watts, cOverride) {
+  const p = P[k];
+  const a = Math.abs(watts);
+  const w = a < 2 ? 0 : 1.4 + 4.2 * Math.sqrt(Math.min(a, 1600) / 800);
+  p.w = w; p.dir = watts >= 0 ? 1 : -1; p.speed = 14 + 50 * Math.sqrt(Math.min(a, 1600) / 800);
+  const c = cOverride || p.c;
+  if (c !== p.cur) {
+    p.flow.setAttribute("class", `flow c-${c} hx` + (p.flow.classList.contains("hl") ? " hl" : ""));
+    p.halo.setAttribute("class", `halo c-${c} hx` + (p.halo.classList.contains("hl") ? " hl" : ""));
+    p.cur = c;
+  }
+  p.flow.setAttribute("stroke-width", w.toFixed(2));
+  p.halo.setAttribute("stroke-width", (w * 3.2).toFixed(2));
+  p.flow.setAttribute("stroke-dasharray", w ? `${(w * 1.2).toFixed(1)} ${(w * 3 + 6).toFixed(1)}` : "0 1");
+  p.flow.style.display = w ? "" : "none";
+  p.halo.style.display = w ? "" : "none";
+}
+function animFlows(dtReal) {
+  const moving = SN && SN.running;
+  for (const k in POWER) {
+    const p = P[k];
+    if (!p.w || reduced || !moving) continue;
+    p.off -= p.dir * p.speed * dtReal;
+    p.flow.setAttribute("stroke-dashoffset", p.off.toFixed(1));
+  }
+}
+
+/* ---------------------------------------------------------- render svg */
+function render() {
+  if (!SN) return;
+  const pvT = sum(S.pv), out = sum(S.out);
+  setFlow("pv1in", S.pv[0]); setFlow("pv2in", S.pv[1]);
+  setFlow("pv1bus", S.pv[0]); setFlow("pv2bus", S.pv[1]);
+  setFlow("busL", pvT);
+  setFlow("busR", out);
+  setFlow("bat", S.pbat, S.pbat >= 0 ? "chg" : "dis");
+  setFlow("o1", S.out[0]); setFlow("o2", S.out[1]);
+  setFlow("o1inv", S.out[0]); setFlow("o2inv", S.out[1]);
+  setFlow("acl", S.ac);
+  setFlow("gridl", S.grid, S.grid >= 0 ? "dis" : "sol");
+
+  V.panel1.textContent = Math.round(S.sun[0]) + " W avail";
+  V.panel2.textContent = Math.round(S.sun[1]) + " W avail";
+  for (let i = 0; i < 2; i++) {
+    const n = i + 1, pv = SN.pv[i], o = SN.out[i];
+    V["pv" + n].textContent = Math.round(pv.w) + " W";
+    V["pv" + n + "s"].textContent = pv.on ? `${pv.v.toFixed(1)} V · ${pv.a.toFixed(2)} A` : "converter off";
+    V["pv" + n + "t"].textContent = `ref ${pv.v_ref.toFixed(1)} V · ≤ ${pv.i_lim.toFixed(1)} A`;
+    V["out" + n].textContent = Math.round(o.w) + " W";
+    V["out" + n + "s"].textContent = o.on ? `${o.v.toFixed(1)} V · ${o.a.toFixed(2)} A` : "off";
+    V["out" + n + "t"].textContent = `heatsink ${S.hs.toFixed(1)} °C`;
+  }
+  V.mcuA.textContent = `${SN.device_type || SN.profile}${SN.version ? " V" + SN.version : ""}`;
+  V.mcuB.textContent = `${Math.round(S.target)} W`;
+  V.mcuC.textContent = "output reference";
+  const irq = sum((SN.mcu.irqs || []).map((x) => x[1]));
+  V.mcuD.textContent = `IRQ ${(irq / 1000).toFixed(2)}k/s · ${(SN.mcu.cycles / 1e6).toFixed(0)} M cycles`;
+  const mq = (SN.fc41d.mqtt || []).some((s) => s.connected);
+  V.fc.textContent = SN.fc41d.wifi ? `Wi‑Fi · ${mq ? "MQTT" : "no MQTT"} · BLE` : "no Wi‑Fi · no MQTT";
+  const minC = Math.min(...S.cells), maxC = Math.max(...S.cells);
+  V.afe.textContent = `${(minC * 1000).toFixed(0)}–${(maxC * 1000).toFixed(0)} mV · Δ ${((maxC - minC) * 1000).toFixed(0)}`;
+  V.afe2.textContent = `${S.I >= 0 ? "+" : ""}${S.I.toFixed(2)} A · ${S.temp.toFixed(1)} °C`;
+  V.fets.textContent = `${S.fets.chg ? "CHG" : "chg"} · ${S.fets.dsg ? "DSG" : "dsg"}`;
+  V.fets.style.fill = S.fets.chg && S.fets.dsg ? "var(--ok)" : "var(--alarm)";
+  $("m-fets").classList.toggle("alarm", !(S.fets.chg && S.fets.dsg));
+  V.inv.textContent = Math.round(S.ac) + " W AC";
+  V.invs.textContent = `in 1 ${Math.round(S.out[0])} W · in 2 ${Math.round(S.out[1])} W`;
+  V.invt.textContent = `tracker at ${(SN.inv[0] || {}).v_set ?? "–"} V`;
+  V.invu.textContent = "model · MPP tracker";
+  V.house.textContent = Math.round(S.load) + " W";
+  V.houses.textContent = "load, phase A";
+  const ct = SN.ct;
+  V.ct.textContent = S.f.ct || S.f.wifi ? "no answer" : ct.last_grid == null ? "waiting for a poll" : `grid ${sgn(ct.last_grid)} W`;
+  $("m-ct").classList.toggle("alarm", !!S.f.ct);
+  const ext = S.ext[0];
+  $("m-extp").style.opacity = ext ? 1 : .35;
+  V.extp.textContent = ext ? ext.soc.toFixed(0) + " %" : "none";
+  V.extps.textContent = ext ? `${ext.v.toFixed(2)} V · ${ext.a.toFixed(2)} A` : "not connected";
+  V.extpt.textContent = "UART5 · 0x73 frames";
+  V.broker.textContent = mq ? "connected" : "offline";
+  V.phone.textContent = SN.fc41d.ble || "–";
+  $("m-fc41d").classList.toggle("alarm", !SN.fc41d.wifi);
+
+  const span = 3.45 - 3.1;
+  const now = performance.now();
+  for (let i = 0; i < CELLS; i++) {
+    const c = CELL[i], v = S.cells[i];
+    const f = clamp((v - 3.1) / span, 0.03, 1);
+    const hh = (c.h - 6) * f;
+    c.fill.setAttribute("y", (c.y + 3 + (c.h - 6) - hh).toFixed(1));
+    c.fill.setAttribute("height", hh.toFixed(1));
+    c.lvl.setAttribute("y", (c.y + 3 + (c.h - 6) - hh).toFixed(1));
+    const col = S.pbat < -2 ? "var(--discharge)" : "var(--charge)";
+    c.fill.setAttribute("fill", col); c.lvl.setAttribute("fill", col);
+    c.balDot.setAttribute("opacity", S.bal[i] ? (0.5 + 0.5 * Math.sin(now / 180)).toFixed(2) : 0);
+    c.hot.setAttribute("opacity", S.f.heat && S.temp > 50 ? 1 : 0);
+    cellSil[2 * i].textContent = (v * 1000).toFixed(0);
+    cellSil[2 * i + 1].textContent = S.bal[i] ? "BAL" : "mV";
+  }
+  // silicon readouts: what the firmware wrote into its peripherals
+  const r = SN.mcu.regs, m = SIL.mcu;
+  const dacTxt = (v) => (v == null ? "off" : hex(v, 3));
+  m[1].textContent = `PC   ${hex(SN.mcu.pc, 8)}`;
+  m[2].textContent = `IRQ  ${Math.round(irq)}/s  ${(SN.mcu.hz / 1e6).toFixed(0)} MHz`;
+  m[3].textContent = `TIM8_CCR3 ${r.TIM8_CCR3}  CCR4 ${r.TIM8_CCR4}`;
+  m[4].textContent = `DAC1 ${dacTxt(r.DAC_DHR12R1)}  DAC2 ${dacTxt(r.DAC_DHR12R2)}`;
+  m[5].textContent = `I2C2 ${SN.afe.reads} reads`;
+  const ccr = [[r.TIM8_CCR3, r.TIM8_CCR4], [r.TIM2_CCR4, r.TIM2_CCR3]];
+  const dac = [r.DAC_DHR12R1, r.DAC_DHR12R2];
+  for (let i = 0; i < 2; i++) {
+    const s = SIL["pv" + (i + 1)], pv = SN.pv[i];
+    s[1].textContent = `CCR ${ccr[i][0]} → Vref ${pv.v_ref.toFixed(2)} V`;
+    s[2].textContent = `CCR ${ccr[i][1]} → Ilim ${pv.i_lim.toFixed(2)} A`;
+    const o = SIL["out" + (i + 1)], ou = SN.out[i];
+    o[1].textContent = dac[i] == null ? "DAC off" : `DAC ${hex(dac[i], 3)} → ${(ou.i_lim * 1000).toFixed(0)} mA`;
+    o[2].textContent = `out ${ou.v.toFixed(2)} V · ${ou.a.toFixed(3)} A`;
+  }
+  const bs = SN.afe.bstatus;
+  SIL.afe[1].textContent = `BSTATUS ${hex(bs[0], 2)} ${hex(bs[1], 2)} ${hex(bs[2], 2)}`;
+  SIL.afe[2].textContent = `BAL ${hex(SN.afe.bal, 4)} FET ${S.fets.chg ? "C" : "-"}${S.fets.dsg ? "D" : "-"}`;
+  SIL.fc[0].textContent = "AT engine · " + String(SN.fc41d.version).slice(-12);
+  SIL.fc[1].textContent = SN.fc41d.wifi ? `MQTT ${mq ? "up" : "down"} · BLE adv` : "Wi‑Fi disconnected";
+  $("shellSoc").textContent = Math.round(S.soc * 100) + "%";
+  $("shellLed").setAttribute("stroke-dasharray", `${(138.2 * S.soc).toFixed(1)} 200`);
+}
+
+/* ------------------------------------------------------------- HUD */
+function renderHud() {
+  if (!SN) return;
+  const g = S.grid;
+  $("hGrid").innerHTML = `${sgn(g)}<u>W</u>`;
+  $("hGrid").style.color = Math.abs(g) < 25 ? "var(--ok)" : g > 0 ? "var(--fg)" : "var(--solar)";
+  $("hGridN").textContent = Math.abs(g) < 25 ? "balanced" : g > 0 ? "import from grid" : "export to grid";
+  $("hAc").innerHTML = `${Math.round(S.ac)}<u>W</u>`;
+  $("hAcN").textContent = `reference ${Math.round(S.target)} W`;
+  $("hPv").innerHTML = `${Math.round(sum(S.pv))}<u>W</u>`;
+  $("hPvN").textContent = `${Math.round(S.pv[0])} + ${Math.round(S.pv[1])} W`;
+  const b = S.pbat;
+  $("hBat").innerHTML = `${sgn(b)}<u>W</u>`;
+  $("hBat").style.color = Math.abs(b) < 3 ? "var(--fg-dim)" : b > 0 ? "var(--charge)" : "var(--discharge)";
+  $("hBatN").textContent = Math.abs(b) < 3 ? "idle" : `${b > 0 ? "charging" : "discharging"} · ${S.I.toFixed(2)} A`;
+  $("hSoc").innerHTML = `${(S.soc * 100).toFixed(1)}<u>%</u>`;
+  const kwh = SN.pack.capacity_ah * S.packV / 1000;
+  $("hSocN").textContent = `${S.packV.toFixed(2)} V · ${(S.soc * kwh).toFixed(2)} of ${kwh.toFixed(2)} kWh`;
+  $("clock").firstChild.nodeValue = "T+" + fmtT(S.t);
+  $("rate").textContent = SN.error ? "stopped: error" : !SN.running ? "paused" : `${SN.rate.toFixed(1)}× real time`;
+  const set = (id, bad, txt) => { const c = $(id); c.classList.remove("off"); c.classList.toggle("bad", bad); c.lastChild.nodeValue = txt; };
+  const mq = (SN.fc41d.mqtt || []).some((s) => s.connected);
+  set("chipWifi", !SN.fc41d.wifi, SN.fc41d.wifi ? "Wi‑Fi" : "Wi‑Fi down");
+  set("chipMqtt", !mq, mq ? "MQTT connected" : "MQTT offline");
+  const ct = SN.ct, lost = S.f.ct || S.f.wifi || ct.age == null || ct.age > 10;
+  set("chipCt", lost, ct.age == null ? "CT002 waiting" : lost ? `CT002 lost ${ct.age.toFixed(0)} s` : `CT002 ${ct.age.toFixed(1)} s ago`);
+  set("chipBle", false, "BLE " + (SN.fc41d.ble || "–"));
+  $("crumb").innerHTML = `${esc(SN.model)} <em>${esc(SN.device_type || "")}</em> · firmware <em>${esc(SN.version ? "V" + SN.version : "starting")}</em> · profile <em>${esc(SN.profile)}</em> · <span title="${esc(SN.image)}">${esc(SN.image.length > 28 ? SN.image.slice(0, 26) + "…" : SN.image)}</span>`;
+  $("devState").textContent = SN.error ? "error" : SN.running ? "running" : "paused";
+  $("playBtn").textContent = SN.running ? "❚❚" : "▶";
+  $("playBtn").setAttribute("aria-label", SN.running ? "Pause" : "Run");
+  document.querySelectorAll("[data-speed]").forEach((x) => x.setAttribute("aria-pressed", String(+x.dataset.speed === SN.speed)));
+  for (const [id, k] of [["fWifi", "wifi"], ["fCt", "ct"], ["fHot", "heat"]]) if (document.activeElement !== $(id)) $(id).checked = !!S.f[k];
+}
+/* --------------------------------------------------------- inspector */
+let sel = "mcu";
+const DESC = {
+  mcu: ["N32G452 microcontroller", "Runs the unmodified firmware image: MPPT, steering against the CT002, MQTT, BLE, protection.", "real"],
+  fc41d: ["FC41D Wi‑Fi/BLE module", "Model of the Quectel module on USART1. Answers the firmware's AT commands; Wi‑Fi, MQTT, UDP and BLE go through it.", "model"],
+  afe: ["SH367309 battery front end", "Model of the front end on I2C2: measures the 14 cells, the current and the temperatures, balances, switches the FETs.", "model"],
+  fets: ["Charge and discharge FETs", "Switched by the front end on the firmware's command. Off on over- or under-voltage, over-current or temperature.", "model"],
+  pack: ["Battery pack", "14 LFP cells in series. Cell model: OCV curve, resistance, polarisation, temperature.", "model"],
+  pv1: ["PV input 1", "Analog buck converter. The firmware sets its voltage reference and current limit through filtered PWM and runs the MPPT itself.", "model"],
+  pv2: ["PV input 2", "Analog buck converter. The firmware sets its voltage reference and current limit through filtered PWM and runs the MPPT itself.", "model"],
+  out1: ["Output 1", "Current source whose reference is the DAC. The firmware shapes it like a PV panel so the microinverter settles at the power it wants.", "model"],
+  out2: ["Output 2", "Current source whose reference is the DAC. The firmware shapes it like a PV panel so the microinverter settles at the power it wants.", "model"],
+  inv: ["Microinverter", "Two-input microinverter with a perturb-and-observe MPP tracker on each input.", "ext"],
+  house: ["House", "The load the battery covers. Set it with the slider, a scenario, or in Home Assistant from one of your sensors.", "ext"],
+  ct: ["CT002 meter", "Measures the grid at the meter and answers the battery's UDP polls: built in, or AstraMeter.", "ext"],
+  panel1: ["Solar panel 1", "Available power, set with the sun slider or a scenario.", "ext"],
+  panel2: ["Solar panel 2", "Available power, set with the sun slider or a scenario.", "ext"],
+  extp: ["Extension pack", "A second pack on the UART5 extension bus, polled with 0x73 frames.", "ext"],
+  broker: ["MQTT broker", "Where the device's MQTT session goes: offline (recorded here) or your broker. hm2mqtt polls it with cd=1.", "ext"],
+  phone: ["Phone (BLE)", "A BLE central. Tools connect through marsemu's BLE bridge.", "ext"],
+};
+const CHMAP = { mcu: null, fc41d: ["USART1", "MQTT", "RF", "BLE"], afe: ["I2C2", "ALARM"], pack: ["I2C2", "UART5", "ALARM"], fets: ["I2C2", "ALARM"], extp: ["UART5"], ct: ["RF"], broker: ["MQTT"], phone: ["BLE"], inv: ["FW", "EVT"], house: ["EVT"], out1: ["FW"], out2: ["FW"], pv1: ["FW", "EVT"], pv2: ["FW", "EVT"], panel1: ["EVT"], panel2: ["EVT"] };
+const BS1 = ["OV", "UV", "OCD1", "OCD2", "OCC", "SC", "PF", "WDT"], BS2 = ["UTC", "OTC", "UTD", "OTD"];
+function kv(rows) { return `<dl class="kv">${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>`; }
+function regs(rows, title, note) {
+  return `<div class="blk"><h4>${title}<span>${note || ""}</span></h4><table class="regs"><tbody>${rows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2] || ""}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function traffic(key) {
+  const chs = CHMAP[key];
+  const lines = LOG.filter((l) => !chs || chs.includes(l.ch)).slice(-6).reverse();
+  return `<div class="blk"><h4>Recent traffic<span>${chs ? chs.join(" · ") : "all buses"}</span></h4><div class="mini">${lines.map((l) => `<div><span style="color:var(--fg-faint)">${l.t.toFixed(1).padStart(7)}</span> <span class="ch-${l.ch}">${l.ch}</span> ${esc(l.text)}</div>`).join("") || "<div>nothing yet</div>"}</div></div>`;
+}
+function cellsGrid() {
+  const mn = Math.min(...S.cells), mx = Math.max(...S.cells);
+  return `<div class="cells">${S.cells.map((v, i) => `<div class="cell${S.bal[i] ? " bal" : ""}${v === mn ? " min" : ""}${v === mx ? " max" : ""}"><small>C${i + 1}</small>${(v * 1000).toFixed(0)}</div>`).join("")}</div>`;
+}
+function flags(list) { return `<div class="flags">${list.map(([n, on, bad]) => `<span class="flag ${bad ? "bad" : on ? "on" : ""}">${n}</span>`).join("")}</div>`; }
+function inspector() {
+  if (!SN) { $("ibody").innerHTML = '<div class="empty">Start a device to inspect it.</div>'; return; }
+  const d = DESC[sel] || DESC.mcu, kind = d[2], r = SN.mcu.regs;
+  let h = `<div class="ititle"><div><h2>${d[0]}</h2><p>${d[1]}</p></div><span class="badge ${kind}">${kind === "real" ? "real firmware" : kind === "ext" ? "outside the box" : "model"}</span></div>`;
+  if (sel === "mcu") {
+    h += kv([["Image", esc(SN.image)], ["Profile", SN.profile], ["Firmware version", SN.version ? "V" + SN.version : "not reported yet"],
+      ["Device type", SN.device_type || "–"], ["Clock", `${(SN.mcu.hz / 1e6).toFixed(0)} MHz · ${(SN.mcu.cycles / 1e6).toFixed(1)} M cycles`],
+      ["Program counter", hex(SN.mcu.pc, 8)], ["Output reference", Math.round(S.target) + " W"]]);
+    const dac = (v) => (v == null ? "off" : hex(v, 3));
+    h += regs([
+      ["TIM8_CCR3", r.TIM8_CCR3, `PV1 Vref ${SN.pv[0].v_ref.toFixed(2)} V`], ["TIM8_CCR4", r.TIM8_CCR4, `PV1 I limit ${SN.pv[0].i_lim.toFixed(2)} A`],
+      ["TIM2_CCR4", r.TIM2_CCR4, `PV2 Vref ${SN.pv[1].v_ref.toFixed(2)} V`], ["TIM2_CCR3", r.TIM2_CCR3, `PV2 I limit ${SN.pv[1].i_lim.toFixed(2)} A`],
+      ["DAC_DHR12R1", dac(r.DAC_DHR12R1), `OUT1 ${SN.out[0].i_lim.toFixed(3)} A`], ["DAC_DHR12R2", dac(r.DAC_DHR12R2), `OUT2 ${SN.out[1].i_lim.toFixed(3)} A`],
+    ], "Peripheral registers", "what the firmware wrote");
+    h += `<div class="formula">Vref = (4374 − CCR) · 500/31 mV · DAC = zero + (mA − 5) / 5.9</div>`;
+    h += regs((SN.mcu.irqs || []).map(([n, rt]) => [n, rt.toFixed(0) + " /s", ""]), "Interrupts", "per emulated second");
+    const adc = Object.entries(SN.mcu.adc || {});
+    if (adc.length) h += regs(adc.map(([k, v]) => [k, v, ""]), "ADC inputs", "what the firmware reads");
+  } else if (sel === "fc41d") {
+    const ms = SN.fc41d.mqtt || [];
+    h += kv([["Module firmware", esc(SN.fc41d.version)], ["Wi‑Fi", SN.fc41d.wifi ? "connected" : "disconnected"], ["BLE name", esc(SN.fc41d.ble || "–")],
+      ...ms.map((s, i) => [`MQTT ${i}`, `${s.connected ? "connected" : "closed"} · ${esc(s.host)}:${s.port}`]),
+      ["Client ID", esc((ms[0] || {}).client_id || "–")], ["Command topic", esc(SN.sub_topic || "not subscribed yet")]]);
+  } else if (sel === "afe" || sel === "pack" || sel === "fets") {
+    const mn = Math.min(...S.cells), mx = Math.max(...S.cells), bs = SN.afe.bstatus;
+    h += kv([["State of charge", (S.soc * 100).toFixed(2) + " %"], ["Pack", `${S.packV.toFixed(2)} V · ${S.I.toFixed(2)} A · ${Math.round(S.pbat)} W`],
+      ["Cell spread", `${((mx - mn) * 1000).toFixed(0)} mV`], ["Temperature", S.temp.toFixed(1) + " °C"],
+      ["Moved", `+${SN.pack.ah_in.toFixed(2)} Ah · −${SN.pack.ah_out.toFixed(2)} Ah`], ["Register reads", SN.afe.reads]]);
+    h += `<div class="blk"><h4>Cells<span>mV · min / max / balancing</span></h4>${cellsGrid()}</div>`;
+    h += `<div class="blk"><h4>Front end status<span>BSTATUS1–3</span></h4>${flags([
+      ["CHG", S.fets.chg, !S.fets.chg], ["DSG", S.fets.dsg, !S.fets.dsg],
+      ...BS1.map((n, i) => [n, false, !!(bs[0] & (1 << i))]), ...BS2.map((n, i) => [n, false, !!(bs[1] & (1 << i))]),
+      ["CHGING", !!(bs[2] & 0x80)], ["DSGING", !!(bs[2] & 0x40)], ["BAL", !!SN.afe.bal]])}</div>`;
+  } else if (sel === "pv1" || sel === "pv2") {
+    const i = sel === "pv1" ? 0 : 1, pv = SN.pv[i];
+    h += kv([["Available", Math.round(pv.avail) + " W"], ["Harvested", Math.round(pv.w) + " W"], ["Operating point", `${pv.v.toFixed(2)} V · ${pv.a.toFixed(2)} A`],
+      ["Voltage reference", pv.v_ref.toFixed(2) + " V"], ["Current limit", pv.i_lim.toFixed(2) + " A"], ["Converter", pv.on ? "on" : "off"]]);
+    h += regs([[i ? "TIM2_CCR4" : "TIM8_CCR3", i ? r.TIM2_CCR4 : r.TIM8_CCR3, "voltage reference"], [i ? "TIM2_CCR3" : "TIM8_CCR4", i ? r.TIM2_CCR3 : r.TIM8_CCR4, "current limit"]], "What the firmware sets", "");
+  } else if (sel === "out1" || sel === "out2") {
+    const i = sel === "out1" ? 0 : 1, o = SN.out[i], dac = i ? r.DAC_DHR12R2 : r.DAC_DHR12R1;
+    h += kv([["Power", Math.round(o.w) + " W"], ["Voltage · current", o.on ? `${o.v.toFixed(2)} V · ${o.a.toFixed(3)} A` : "off"], ["Current reference", o.i_lim.toFixed(3) + " A"], ["Heatsink", S.hs.toFixed(1) + " °C"]]);
+    h += regs([[`DAC_DHR12R${i + 1}`, dac == null ? "off" : hex(dac, 3), "current reference"]], "What the firmware sets", "");
+  } else if (sel === "inv") {
+    h += kv([["AC out", Math.round(S.ac) + " W"], ...SN.inv.map((x, i) => [`Input ${i + 1}`, `${Math.round(S.out[i])} W · tracker at ${x.v_set} V`])]);
+  } else if (sel === "ct") {
+    const ct = SN.ct;
+    h += kv([["Grid at the meter", sgn(S.grid) + " W"], ["Last answer", ct.age == null ? "none yet" : `${ct.age.toFixed(1)} s ago`], ["Polls", ct.polls], ["Answered", ct.answered], ["Meter MAC", ct.mac], ["Offline (fault)", S.f.ct ? "yes" : "no"]]);
+  } else if (sel === "house") {
+    h += kv([["Load", Math.round(S.load) + " W"], ["Covered by the battery", Math.round(Math.min(S.ac, S.load)) + " W"], ["From the grid", Math.round(Math.max(0, S.grid)) + " W"], ["To the grid", Math.round(Math.max(0, -S.grid)) + " W"]]);
+  } else if (sel === "extp") {
+    h += S.ext.length ? kv(S.ext.flatMap((e, i) => [[`Pack ${i + 1} charge`, e.soc.toFixed(1) + " %"], [`Pack ${i + 1}`, `${e.v.toFixed(2)} V · ${e.a.toFixed(2)} A`]]))
+      : '<div class="empty">No extension pack. Start the device with one to see it here.</div>';
+    if (SN.bus && Object.keys(SN.bus).length) h += kv(Object.entries(SN.bus).slice(0, 10).map(([k, v]) => [k, esc(Array.isArray(v) ? v.join(" ") : v)]));
+  } else if (sel === "broker") {
+    const s = (SN.fc41d.mqtt || [])[0];
+    h += kv([["Session", s ? `${s.connected ? "connected" : "closed"} · ${esc(s.host)}:${s.port}` : "none"], ["Command topic", esc(SN.sub_topic || "–")]]);
+  } else if (sel === "phone") {
+    h += kv([["Advertising as", esc(SN.fc41d.ble || "–")], ["Central", "connect with marsemu's BLE bridge"]]);
+  } else if (sel === "panel1" || sel === "panel2") {
+    const i = sel === "panel1" ? 0 : 1;
+    h += kv([["Available", Math.round(S.sun[i]) + " W"], ["Harvested", Math.round(S.pv[i]) + " W"]]);
+  }
+  h += traffic(sel);
+  $("ibody").innerHTML = h;
+}
+function select(key) {
+  sel = key;
+  document.querySelectorAll(".comp.sel").forEach((e) => e.classList.remove("sel"));
+  if (key === "pack") cellsG.querySelectorAll(".comp").forEach((e) => e.classList.add("sel"));
+  else { const e = $("m-" + key); if (e) e.classList.add("sel"); }
+  $("inspHint").textContent = key;
+  inspector();
+}
+svg.addEventListener("click", (e) => { const g = e.target.closest("[data-mod]"); if (g) select(g.dataset.mod); });
+svg.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.dataset && e.target.dataset.mod) { e.preventDefault(); select(e.target.dataset.mod); }
+});
+
+/* ------------------------------------------------------------ console */
+const LOG = []; const LOGMAX = 600;
+const CHANNELS = ["FW", "I2C2", "USART1", "UART5", "MQTT", "RF", "BLE", "EVT", "ALARM"];
+const shown = new Set(CHANNELS);
+let logDirty = true;
+function log(ch, dir, text, t) {
+  LOG.push({ t: t ?? S.t, ch, dir, text });
+  if (LOG.length > LOGMAX) LOG.shift();
+  logDirty = true;
+}
+const filt = $("filters");
+CHANNELS.forEach((ch) => {
+  const b = document.createElement("button");
+  b.textContent = ch; b.className = "ch-" + ch; b.setAttribute("aria-pressed", "true");
+  b.addEventListener("click", () => { if (shown.has(ch)) shown.delete(ch); else shown.add(ch); b.setAttribute("aria-pressed", shown.has(ch)); logDirty = true; renderLog(); });
+  filt.appendChild(b);
+});
+const logEl = $("log");
+let stick = true;
+logEl.addEventListener("scroll", () => { stick = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8; });
+function renderLog() {
+  if (!logDirty) return;
+  logDirty = false;
+  const rows = LOG.filter((l) => shown.has(l.ch)).slice(-200);
+  logEl.innerHTML = rows.map((l) => `<div class="ln" title="${esc(l.dir)}"><span class="t">${l.t.toFixed(1).padStart(7)}</span><span class="c ch-${l.ch}">${l.ch}</span><span class="x">${l.dir ? `<span style="color:var(--fg-faint)">${esc(l.dir)}</span>  ` : ""}${esc(l.text)}</span></div>`).join("");
+  if (stick) logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ------------------------------------------------------------- history */
+const hist = []; const HMAX = 600;
+let pendingMark = null;
+/* ------------------------------------------------------------- charts */
+const charts = [
+  { cv: $("c1"), series: [["grid", "fg"], ["ac", "discharge"], ["pv", "solar"], ["bat", "charge"]], zero: true },
+  { cv: $("c2"), series: [["soc", "xray"]], right: ["v", "fg-dim"] },
+  { cv: $("c3"), band: ["cmin", "cmax"] },
+];
+let hoverX = null;
+charts.forEach((ch) => {
+  ch.cv.addEventListener("pointermove", (e) => { const r = ch.cv.getBoundingClientRect(); hoverX = (e.clientX - r.left) / r.width; });
+  ch.cv.addEventListener("pointerleave", () => { hoverX = null; $("hoverRead").textContent = ""; });
+});
+function drawCharts() {
+  if (!hist.length) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const t1 = hist[hist.length - 1].t, t0 = t1 - HMAX * 0.5;
+  let hi = null;
+  if (hoverX != null) {
+    const tt = t0 + hoverX * (t1 - t0);
+    hi = hist.reduce((a, b) => (Math.abs(b.t - tt) < Math.abs(a.t - tt) ? b : a));
+  }
+  charts.forEach((ch, ci) => {
+    const cv = ch.cv, W = cv.clientWidth, H = cv.clientHeight;
+    if (!W || !H) return;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const g = cv.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const L = 36, R = ch.right ? 36 : 6, T = 8, B = 16;
+    const x = (t) => L + (t - t0) / (t1 - t0) * (W - L - R);
+    let lo, hiV;
+    if (ch.band) {
+      lo = Math.min(...hist.map((h) => h.cmin)) - 4; hiV = Math.max(...hist.map((h) => h.cmax)) + 4;
+    } else {
+      const vals = hist.flatMap((h) => ch.series.map(([k]) => h[k]));
+      lo = Math.min(0, ...vals); hiV = Math.max(...vals, ch.zero ? 100 : 1);
+      if (ci === 1) { lo = Math.max(0, Math.floor(Math.min(...vals) - 2)); hiV = Math.min(100, Math.ceil(Math.max(...vals) + 2)); }
+    }
+    if (hiV - lo < 1e-6) hiV = lo + 1;
+    const nice = (v) => { const p = Math.pow(10, Math.floor(Math.log10(v))); const m = v / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; };
+    const step = nice((hiV - lo) / 3);
+    lo = Math.floor(lo / step) * step; hiV = Math.ceil(hiV / step) * step;
+    const y = (v) => T + (1 - (v - lo) / (hiV - lo)) * (H - T - B);
+    g.font = `500 9.5px ${C("f-mono")}`;
+    g.textBaseline = "middle";
+    for (let v = lo; v <= hiV + 1e-9; v += step) {
+      g.strokeStyle = v === 0 && ch.zero ? C("line-2") : C("line");
+      g.lineWidth = 1;
+      g.beginPath(); g.moveTo(L, Math.round(y(v)) + .5); g.lineTo(W - R, Math.round(y(v)) + .5); g.stroke();
+      g.fillStyle = C("fg-faint"); g.textAlign = "right";
+      g.fillText(!ch.band && Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + "k" : String(Math.round(v * 10) / 10), L - 5, y(v));
+    }
+    g.textAlign = "left"; g.textBaseline = "alphabetic"; g.fillStyle = C("fg-faint");
+    g.fillText("−5 min", L, H - 3); g.textAlign = "right"; g.fillText("now", W - R, H - 3);
+    // event marks
+    hist.forEach((h) => { if (h.ev) { g.strokeStyle = C("warn"); g.globalAlpha = .55; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(x(h.t) + .5, T); g.lineTo(x(h.t) + .5, H - B); g.stroke(); g.setLineDash([]); g.globalAlpha = 1; if (ci === 0) { g.fillStyle = C("warn"); g.textAlign = "left"; g.fillText(h.ev, x(h.t) + 3, T + 9); } } });
+    const line = (k, col, yy = y, width = 1.4) => {
+      g.strokeStyle = C(col); g.lineWidth = width; g.beginPath();
+      hist.forEach((h, i) => { const px = x(h.t), py = yy(h[k]); i ? g.lineTo(px, py) : g.moveTo(px, py); });
+      g.stroke();
+      const last = hist[hist.length - 1];
+      g.fillStyle = C(col); g.beginPath(); g.arc(x(last.t), yy(last[k]), 2.4, 0, 7); g.fill();
+    };
+    if (ch.band) {
+      g.fillStyle = "rgba(142,241,255,.08)";
+      g.beginPath();
+      hist.forEach((h, i) => { const px = x(h.t), py = y(h.cmax); i ? g.lineTo(px, py) : g.moveTo(px, py); });
+      for (let i = hist.length - 1; i >= 0; i--) g.lineTo(x(hist[i].t), y(hist[i].cmin));
+      g.closePath(); g.fill();
+      line("cmin", "charge"); line("cmax", "discharge");
+      g.fillStyle = C("warn");
+      hist.forEach((h) => { if (h.bal) g.fillRect(x(h.t) - .5, H - B - 3, 1.5, 3); });
+    } else {
+      if (ch.zero) {
+        // area under the AC line
+        g.fillStyle = "rgba(255,181,71,.07)"; g.beginPath(); g.moveTo(x(hist[0].t), y(0));
+        hist.forEach((h) => g.lineTo(x(h.t), y(h.ac))); g.lineTo(x(hist[hist.length - 1].t), y(0)); g.closePath(); g.fill();
+      }
+      ch.series.forEach(([k, col]) => line(k, col));
+      if (ch.right) {
+        const vals = hist.map((h) => h.v); let a = Math.min(...vals) - .1, b = Math.max(...vals) + .1;
+        const yr = (v) => T + (1 - (v - a) / (b - a)) * (H - T - B);
+        line("v", "fg-dim", yr, 1);
+        g.fillStyle = C("fg-faint"); g.textAlign = "left"; g.textBaseline = "middle";
+        g.fillText(b.toFixed(1) + " V", W - R + 4, yr(b)); g.fillText(a.toFixed(1) + " V", W - R + 4, yr(a));
+      }
+    }
+    if (hi) {
+      g.strokeStyle = C("xray"); g.globalAlpha = .6; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(x(hi.t) + .5, T); g.lineTo(x(hi.t) + .5, H - B); g.stroke(); g.globalAlpha = 1;
+    }
+  });
+  if (hi) $("hoverRead").textContent = `T+${fmtT(hi.t)} · grid ${Math.round(hi.grid)} W · AC ${Math.round(hi.ac)} W · PV ${Math.round(hi.pv)} W · bat ${Math.round(hi.bat)} W · SOC ${hi.soc.toFixed(1)} % · cells ${hi.cmin.toFixed(0)}–${hi.cmax.toFixed(0)} mV`;
+}
+
+/* --------------------------------------------------------------- lens */
+const lens = { on: true, x: 565, y: 195, r: 92, m: 1.8 };
+const ticksG = $("lensTicks");
+for (let i = 0; i < 24; i++) {
+  const a = i / 24 * Math.PI * 2, r1 = 92, r2 = i % 6 === 0 ? 103 : 98;
+  el("line", { class: "lenstick", x1: 0, y1: 0, x2: 0, y2: 0, "data-a": a, "data-r1": r1, "data-r2": r2, opacity: i % 6 === 0 ? .9 : .4 }, ticksG);
+}
+function placeLens() {
+  const { x, y, r, m } = lens;
+  $("lensClipC").setAttribute("cx", x); $("lensClipC").setAttribute("cy", y);
+  $("lensBgC").setAttribute("cx", x); $("lensBgC").setAttribute("cy", y);
+  $("lensRing").setAttribute("cx", x); $("lensRing").setAttribute("cy", y);
+  $("lensRing2").setAttribute("cx", x); $("lensRing2").setAttribute("cy", y);
+  $("lensLab").setAttribute("x", x); $("lensLab").setAttribute("y", y + r + 20);
+  $("lensInner").setAttribute("transform", `translate(${x} ${y}) scale(${m}) translate(${-x} ${-y})`);
+  ticksG.querySelectorAll("line").forEach((t) => {
+    const a = +t.dataset.a, r1 = +t.dataset.r1, r2 = +t.dataset.r2;
+    t.setAttribute("x1", x + Math.cos(a) * r1); t.setAttribute("y1", y + Math.sin(a) * r1);
+    t.setAttribute("x2", x + Math.cos(a) * r2); t.setAttribute("y2", y + Math.sin(a) * r2);
+  });
+}
+function toSvg(e) {
+  const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+svg.addEventListener("pointermove", (e) => {
+  if (!lens.on || (e.pointerType === "touch" && e.buttons === 0)) return;
+  const p = toSvg(e); lens.x = clamp(p.x, 0, 1200); lens.y = clamp(p.y, -40, 680); placeLens();
+});
+function setLens(on) { lens.on = on; $("lens").style.display = on ? "" : "none"; $("lensTog").checked = on; }
+$("lensTog").addEventListener("change", (e) => setLens(e.target.checked));
+
+/* ------------------------------------------------------------- depth */
+function setDepth(d) {
+  svg.classList.remove("d0", "d1", "d2"); svg.classList.add("d" + d);
+  document.querySelectorAll("[data-depth]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.depth === d)));
+  $("lensLab").textContent = d === 0 ? "BOARDS + SILICON ×1.8" : "SILICON ×1.8";
+}
+document.querySelectorAll("[data-depth]").forEach((b) => b.addEventListener("click", () => setDepth(+b.dataset.depth)));
+$("flowTog").addEventListener("change", (e) => svg.classList.toggle("noflow", !e.target.checked));
+$("dataTog").addEventListener("change", (e) => svg.classList.toggle("nodata", !e.target.checked));
+
+/* -------------------------------------------------------- run controls */
+document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("click", () => control({ op: "speed", x: +b.dataset.speed })));
+$("playBtn").addEventListener("click", () => control({ op: "pause", on: !!(SN && SN.running) }));
+$("stepBtn").addEventListener("click", () => control({ op: "step", s: 1 }));
+$("stopBtn").addEventListener("click", () => post("api/stop").catch((e) => log("EVT", "", "stop failed: " + e.message)));
+$("askBtn").addEventListener("click", () => control({ op: "mqtt", payload: "cd=1" }));
+const timers = {};
+function debounced(key, fn) { clearTimeout(timers[key]); timers[key] = setTimeout(fn, 160); }
+function bind(id, out, fmt, send) {
+  const i = $(id);
+  i.addEventListener("input", () => { $(out).textContent = fmt(+i.value); debounced(id, () => send(+i.value)); });
+}
+bind("sLoad", "oLoad", (v) => v + " W", (v) => control({ op: "load", w: v }));
+const sendPv = () => control({ op: "pv", w: [+$("sPv1").value, +$("sPv2").value] });
+bind("sPv1", "oPv1", (v) => v + " W", sendPv);
+bind("sPv2", "oPv2", (v) => v + " W", sendPv);
+bind("sAmb", "oAmb", (v) => v + " °C", (v) => control({ op: "ambient", c: v }));
+function syncSliders() {
+  if (!SN) return;
+  const put = (id, out, v, fmt) => { const i = $(id); if (document.activeElement !== i && !timers[id + "busy"]) { i.value = v; $(out).textContent = fmt(v); } };
+  put("sLoad", "oLoad", Math.round(SN.load), (v) => v + " W");
+  put("sPv1", "oPv1", Math.round(SN.pv[0].avail), (v) => v + " W");
+  put("sPv2", "oPv2", Math.round(SN.pv[1].avail), (v) => v + " W");
+  put("sAmb", "oAmb", Math.round(SN.ambient), (v) => v + " °C");
+}
+$("scStep").addEventListener("click", () => control({ op: "scenario", name: "load_step" }));
+$("scCloud").addEventListener("click", () => control({ op: "scenario", name: "cloud" }));
+$("scExport").addEventListener("click", () => control({ op: "scenario", name: "surplus" }));
+for (const [id, name] of [["fWifi", "wifi"], ["fCt", "ct"], ["fHot", "heat"]])
+  $(id).addEventListener("change", (e) => control({ op: "fault", name, on: e.target.checked }));
+
+/* -------------------------------------------------------------- trace */
+const TRACE = [
+  { h: "The CT002 measures the grid", p: () => `At the meter the house draws ${Math.round(S.load)} W and the battery delivers ${Math.round(S.ac)} W, so the grid shows ${sgn(S.grid)} W.`, hl: ["m-ct", "gridl", "m-house"], sel: "ct" },
+  { h: "The firmware asks the meter", p: () => `The MCU sends AT+QISEND to the Wi‑Fi module, which sends a UDP poll to the meter. ${SN.ct.polls} polls so far.`, hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfct", "m-ct"], sel: "fc41d", go: () => capsule("usart", 1, "QISEND") },
+  { h: "The meter answers over Wi‑Fi", p: () => `The last answer said ${SN.ct.last_grid == null ? "nothing yet" : sgn(SN.ct.last_grid) + " W on phase A"}. The module hands it to the MCU on USART1.`, hl: ["m-ct", "rfct", "ant", "m-fc41d", "usart", "m-mcu"], sel: "fc41d", go: () => capsule("rfct", -1, SN.ct.last_grid == null ? "reply" : `A ${sgn(SN.ct.last_grid)} W`) },
+  { h: "The firmware decides", p: () => `This is the real firmware, not a model. Its answer right now: an output reference of ${Math.round(S.target)} W, split over both outputs.`, hl: ["m-mcu"], sel: "mcu" },
+  { h: "It sets the output currents", p: () => `It writes the DAC: ${SN.mcu.regs.DAC_DHR12R1 == null ? "off" : hex(SN.mcu.regs.DAC_DHR12R1, 3)} and ${SN.mcu.regs.DAC_DHR12R2 == null ? "off" : hex(SN.mcu.regs.DAC_DHR12R2, 3)}, the current references of the two output stages. The ADC reads back voltage and current.`, hl: ["m-mcu", "dac1", "dac2", "m-out1", "m-out2"], sel: "out1" },
+  { h: "The microinverter follows", p: () => "Each output looks like a PV panel to the microinverter, whose own MPP tracker settles where the firmware wants it.", hl: ["m-out1", "m-out2", "o1inv", "o2inv", "m-inv"], sel: "inv" },
+  { h: "AC reaches the house", p: () => `${Math.round(S.ac)} W AC flows to the house, and the grid at the meter moves toward 0 W (now ${sgn(S.grid)} W).`, hl: ["m-inv", "acl", "m-house", "gridl", "m-ct"], sel: "house" },
+  { h: "The battery makes up the difference", p: () => `PV gives ${Math.round(sum(S.pv))} W and the outputs take ${Math.round(sum(S.out))} W, so the pack ${S.pbat >= 0 ? "charges with" : "gives"} ${Math.abs(Math.round(S.pbat))} W through the FETs. The front end measures every cell on I2C2.`, hl: ["m-pv1", "m-pv2", "pv1bus", "pv2bus", "busL", "busR", "bat", "m-fets", "m-afe", "i2c", "sense", "cells"], sel: "pack" },
+];
+let tri = -1;
+const dotsEl = $("trDots"); TRACE.forEach(() => dotsEl.appendChild(document.createElement("i")));
+function traceGo(i) {
+  if (!SN || i < 0 || i >= TRACE.length) return traceEnd();
+  tri = i;
+  svg.classList.add("tracing");
+  $("trace").hidden = false;
+  const s = TRACE[i];
+  $("trN").textContent = i + 1; $("trH").textContent = s.h; $("trP").textContent = s.p();
+  [...dotsEl.children].forEach((d, j) => d.classList.toggle("on", j <= i));
+  svg.querySelectorAll(".hl").forEach((e) => e.classList.remove("hl"));
+  s.hl.forEach((k) => {
+    if (k === "cells") cellsG.querySelectorAll(".comp").forEach((e) => e.classList.add("hl"));
+    const byId = $(k); if (byId) byId.classList.add("hl");
+    svg.querySelectorAll(`[data-k="${k}"]`).forEach((e) => e.classList.add("hl"));
+  });
+  select(s.sel);
+  if (s.go) s.go();
+  $("trPrev").disabled = i === 0;
+  $("trNext").textContent = i === TRACE.length - 1 ? "Done" : "Next";
+}
+function traceEnd() {
+  tri = -1; svg.classList.remove("tracing"); $("trace").hidden = true;
+  svg.querySelectorAll(".hl").forEach((e) => e.classList.remove("hl"));
+}
+$("traceBtn").addEventListener("click", () => traceGo(0));
+$("trNext").addEventListener("click", () => traceGo(tri + 1));
+$("trPrev").addEventListener("click", () => traceGo(Math.max(0, tri - 1)));
+$("trEnd").addEventListener("click", traceEnd);
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input,select,textarea")) return;
+  if (e.key === "Escape") traceEnd();
+  else if (e.key === "l" || e.key === "L") setLens(!lens.on);
+  else if (e.key === "0" || e.key === "1" || e.key === "2") setDepth(+e.key);
+  else if ((e.key === "t" || e.key === "T") && SN) traceGo(0);
+  else if (e.key === "ArrowRight" && tri >= 0) traceGo(tri + 1);
+  else if (e.key === "ArrowLeft" && tri > 0) traceGo(tri - 1);
+});
+
+/* ------------------------------------------------------- start screen */
+let images = [], chosen = null, canUpload = true;
+function renderImages() {
+  const box = $("imgs");
+  if (!images.length) box.innerHTML = '<div class="empty">No firmware images in the firmware folder yet.</div>';
+  else box.innerHTML = images.map((im) => `<button class="img" data-img="${esc(im.name)}" aria-pressed="${im.name === chosen}" ${im.supported ? "" : "disabled"}>
+      <small class="${im.supported ? "ok" : ""}">${im.supported ? "B2500" : "not yet"}</small>
+      <span class="nm" title="${esc(im.name)}">${esc(im.name)}</span>
+      <small>${esc(im.profile || im.error || "unknown")}</small></button>`).join("");
+  box.querySelectorAll("[data-img]").forEach((b) => b.addEventListener("click", () => { chosen = b.dataset.img; renderImages(); }));
+  $("startBtn").disabled = !chosen;
+  $("drop").hidden = !canUpload;
+}
+function showStart(on) { $("start").hidden = !on; if (on) { traceEnd(); renderImages(); } }
+async function upload(file) {
+  $("startErr").textContent = "";
+  try {
+    const info = await post("api/firmware?name=" + encodeURIComponent(file.name), file, true);
+    const st = await (await fetch("api/state")).json();
+    images = st.images; chosen = info.supported ? info.name : chosen;
+    if (!info.supported) $("startErr").textContent = `${info.name}: ${info.profile || "unknown image"} is not in the dashboard yet.`;
+    renderImages();
+  } catch (e) { $("startErr").textContent = e.message; }
+}
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); } });
+$("file").addEventListener("change", (e) => { if (e.target.files[0]) upload(e.target.files[0]); e.target.value = ""; });
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); });
+$("startBtn").addEventListener("click", async () => {
+  $("startErr").textContent = ""; $("startBtn").disabled = true; $("startBtn").textContent = "Starting…";
+  try {
+    await post("api/start", { image: chosen, pv: [+$("oPvA").value, +$("oPvB").value], load: +$("oLoadS").value, soc: +$("oSoc").value });
+  } catch (e) { $("startErr").textContent = e.message; }
+  $("startBtn").disabled = !chosen; $("startBtn").textContent = "Start";
+});
+
+/* ------------------------------------------------------------- stream */
+let fresh = true;
+function onState(st) {
+  images = st.images || []; canUpload = st.upload !== false;
+  if (!chosen && images.some((i) => i.supported)) chosen = (images.find((i) => i.name === st.image) || images.find((i) => i.supported)).name;
+  if (st.running) {
+    showStart(false);
+    if (st.snapshot) { fromSnap(st.snapshot); syncSliders(); }
+  } else {
+    SN = null; showStart(true);
+    for (const [id, txt] of [["chipWifi", "Wi‑Fi"], ["chipMqtt", "MQTT"], ["chipCt", "CT002"], ["chipBle", "BLE"]]) {
+      const c = $(id); c.classList.add("off"); c.classList.remove("bad"); c.lastChild.nodeValue = txt;
+    }
+    $("crumb").textContent = "no device running"; $("devState").textContent = "ready";
+  }
+  LOG.length = 0; hist.length = 0; logDirty = true; fresh = true;
+}
+function onTick(r) {
+  fromSnap(r.snapshot);
+  for (const ev of r.events) {
+    log(ev.ch, ev.dir, ev.text, ev.t);
+    if (!fresh && $("dataTog").checked) capsuleFor(ev);
+  }
+  for (const h of r.history) { hist.push(h); if (hist.length > HMAX) hist.shift(); }
+  fresh = false;
+}
+let es = null;
+function connect() {
+  es = new EventSource("api/stream");
+  const link = (ok, txt) => { const c = $("chipLink"); c.classList.toggle("bad", !ok); c.lastChild.nodeValue = txt; };
+  es.onopen = () => link(true, "live");
+  es.onerror = () => link(false, "reconnecting");
+  es.addEventListener("hello", (e) => onState(JSON.parse(e.data)));
+  es.addEventListener("idle", (e) => { images = JSON.parse(e.data).images || []; if (!SN) renderImages(); });
+  es.addEventListener("tick", (e) => onTick(JSON.parse(e.data)));
+}
+
+/* --------------------------------------------------------------- loop */
+let last = performance.now(), slowT = 0;
+function frame(now) {
+  const dt = clamp((now - last) / 1000, 0, 0.1); last = now;
+  animFlows(dt);
+  animCaps(now);
+  if (SN) render();
+  if (!reduced && SN) $("beam").setAttribute("x", (170 + ((now / 7000) % 1) * 820).toFixed(1));
+  if (now - slowT > 250) { slowT = now; renderHud(); syncSliders(); inspector(); renderLog(); drawCharts(); }
+  else if (hoverX != null) drawCharts();
+  requestAnimationFrame(frame);
+}
+placeLens(); setDepth(1); select("mcu"); connect();
+requestAnimationFrame(frame);
+window.addEventListener("resize", () => drawCharts());
+})();

@@ -760,3 +760,30 @@ def test_b2500_holds_its_output_while_a_detecting_battery_reports_discharge():
         assert b.ac_power > steady + 200, f"held at {b.ac_power:.0f} W without x_dchrg"
     finally:
         b.close()
+
+
+@pytest.mark.firmware
+def test_ui_session_b2500_steers_and_logs_every_bus():
+    """The dashboard's session around a B2500: the firmware steers the grid to
+    about 0 W, and every bus the dashboard draws shows up in its log."""
+    import time
+    from marsemu.ui.session import B2500Session
+    files = sorted(glob.glob(f"{FW}/HMJ-2/V116/*.bin"))
+    if not files:
+        pytest.skip("B2500 HMJ-2 V116 not available")
+    s = B2500Session(files[0], pv=(300, 280), load=420, speed=0)
+    s.start()
+    try:
+        deadline = time.time() + 600
+        while s.read()["snapshot"]["t"] < 80 and time.time() < deadline:
+            time.sleep(0.5)
+        r = s.read()
+    finally:
+        s.stop()
+    snap = r["snapshot"]
+    assert snap["error"] is None
+    assert snap["version"] == "116" and snap["device_type"] == "HMJ-2"
+    assert abs(snap["grid"]) < 60, snap["grid"]
+    assert {"USART1", "RF", "MQTT", "I2C2", "UART5"} <= {e["ch"] for e in r["events"]}
+    assert snap["mcu"]["regs"]["TIM8_CCR3"] and snap["mcu"]["irqs"]
+    assert len(r["history"]) > 100

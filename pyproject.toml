@@ -37,7 +37,7 @@ marsemu = "marsemu.cli:main"
 include = ["marsemu*"]
 
 [tool.setuptools.package-data]
-marsemu = ["data/*.json"]
+marsemu = ["data/*.json", "ui/static/*"]
 
 [tool.pytest.ini_options]
 addopts = "-m 'not firmware'"

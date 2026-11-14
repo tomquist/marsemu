@@ -105,6 +105,26 @@ def build_parser() -> argparse.ArgumentParser:
     from .plant import venus3_cli
     venus3_cli.add_parser(sub)
 
+    u = sub.add_parser("ui", help="dashboard in the browser: start a device and look inside it")
+    u.add_argument("image", nargs="?", help="start this image right away (else pick one in the dashboard)")
+    u.add_argument("--firmware-dir", help="folder of firmware images the dashboard offers and saves uploads to "
+                   "(default: the image's folder, else the current folder)")
+    u.add_argument("--host", default="127.0.0.1", help="address to listen on (0.0.0.0: every interface)")
+    u.add_argument("--port", type=int, default=8080)
+    u.add_argument("--state-dir", help="keep each image's flash and module state here between runs")
+    u.add_argument("--mqtt", choices=["offline", "broker"], default="offline",
+                   help="offline: record only; broker: the device's MQTT session goes to --broker")
+    u.add_argument("--broker", default="127.0.0.1:1883")
+    u.add_argument("--broker-auth", help="user:password for --broker")
+    u.add_argument("--meter", default="local", metavar="local|HOST:PORT",
+                   help="who answers the CT002 polls: the built-in meter, or a CT002 emulator such as AstraMeter")
+    u.add_argument("--pv", default="300,300", metavar="W,W", help="available PV power per input")
+    u.add_argument("--load", type=float, default=400.0, help="house load, W")
+    u.add_argument("--soc", type=float, default=50.0, help="state of charge at start, %%")
+    u.add_argument("--speed", type=float, default=1.0, help="emulated seconds per second at most (0: as fast as possible)")
+    u.add_argument("--no-upload", action="store_true", help="don't accept firmware uploads in the dashboard")
+    u.add_argument("-v", "--verbose", action="count", default=0)
+
     i = sub.add_parser("info", help="identify a firmware image")
     i.add_argument("firmware", nargs="+")
     sub.add_parser("profiles", help="list board profiles")
@@ -436,27 +456,68 @@ def cmd_run(args) -> int:
     return 0
 
 
+def image_info(path: str) -> dict:
+    """What ``marsemu info`` prints for one image: profile, load address,
+    device types, BLE name and MQTT prefixes."""
+    with open(path, "rb") as f:
+        img = f.read()
+    prof = detect(img, path)
+    sp, rst = struct.unpack_from("<II", img, 0)
+    base = load_base(img)
+    info = {
+        "file": path, "size": len(img), "profile": prof.name, "linked_at": hex(base),
+        "initial_sp": hex(sp), "reset": hex(rst), "fc41d": b"AT+Q" in img,
+    }
+    tables = find_type_tables(img, base) if prof.name.startswith("b2500") else []
+    if tables:
+        # B2500: the build accepts every type in its table; a unit's type is factory data
+        info["device_types_supported"] = max((t[2] for t in tables), key=len)
+        info["device_type_default"] = default_device_type(img, base, prof)
+    else:
+        names = sorted(set(re.findall(rb"(?:HM[A-Z]-\d+|VNS[A-Z0-9]+-\d|JPLS-\w+)", img)))
+        info["device_types"] = [n.decode() for n in names]
+    info["ble_name"] = sorted(set(m.decode() for m in re.findall(rb"AT\+QBLENAME=([^\r\n\x00]{1,24})", img)))
+    info["mqtt_prefixes"] = sorted(set(m.decode() for m in re.findall(rb"(hame_energy|marstek_energy)/", img)))
+    return info
+
+
+def cmd_ui(args) -> int:
+    import os
+    from .ui.server import UiApp, serve
+    logging.basicConfig(level=logging.WARNING - 10 * min(args.verbose, 2),
+                        format="%(levelname)-7s %(name)s: %(message)s")
+    logging.getLogger("emu.cpu").setLevel(logging.ERROR)
+    if args.image and not args.firmware_dir:
+        fw_dir = os.path.dirname(os.path.abspath(args.image))
+    else:
+        fw_dir = args.firmware_dir or os.getcwd()
+    broker = _hostport(args.broker, 1883)
+    auth = tuple(args.broker_auth.split(":", 1)) if args.broker_auth else None
+    app = UiApp(fw_dir, state_dir=args.state_dir, meter=args.meter, allow_upload=not args.no_upload,
+                network=lambda: Network(mqtt=args.mqtt, broker=broker, broker_auth=auth),
+                defaults={"pv": [float(x) for x in args.pv.split(",")], "load": args.load, "soc": args.soc,
+                          "speed": args.speed})
+    serve(app, args.host, args.port)
+    shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
+    print(f"marsemu dashboard at http://{shown}:{args.port}/  (firmware folder: {fw_dir})", flush=True)
+    if args.image:
+        try:
+            app.start({"image": os.path.basename(args.image)})
+        except (OSError, ValueError) as exc:
+            print(f"marsemu: {exc}", file=sys.stderr)
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        app.stop()
+    return 0
+
+
 def cmd_info(args) -> int:
     for f in args.firmware:
-        img = open(f, "rb").read()
-        prof = detect(img, f)
-        sp, rst = struct.unpack_from("<II", img, 0)
-        base = load_base(img)
-        info = {
-            "file": f, "size": len(img), "profile": prof.name, "linked_at": hex(base),
-            "initial_sp": hex(sp), "reset": hex(rst), "fc41d": b"AT+Q" in img,
-        }
-        tables = find_type_tables(img, base) if prof.name.startswith("b2500") else []
-        if tables:
-            # B2500: the build accepts every type in its table; a unit's type is factory data
-            info["device_types_supported"] = max((t[2] for t in tables), key=len)
-            info["device_type_default"] = default_device_type(img, base, prof)
-        else:
-            names = sorted(set(re.findall(rb"(?:HM[A-Z]-\d+|VNS[A-Z0-9]+-\d|JPLS-\w+)", img)))
-            info["device_types"] = [n.decode() for n in names]
-        info["ble_name"] = sorted(set(m.decode() for m in re.findall(rb"AT\+QBLENAME=([^\r\n\x00]{1,24})", img)))
-        info["mqtt_prefixes"] = sorted(set(m.decode() for m in re.findall(rb"(hame_energy|marstek_energy)/", img)))
-        print(json.dumps(info, indent=1))
+        print(json.dumps(image_info(f), indent=1))
     return 0
 
 
@@ -479,6 +540,8 @@ def _dispatch(args) -> int:
         return cmd_run(args)
     if args.cmd == "info":
         return cmd_info(args)
+    if args.cmd == "ui":
+        return cmd_ui(args)
     if args.cmd in ("venus3", "venusd", "venusa", "jupiter", "b2500"):
         from .plant.venus3_cli import cmd_venus3
         return cmd_venus3(args)

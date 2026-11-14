@@ -89,9 +89,11 @@ marsemu/
               venus3.py · venusd.py · venusa.py · venusce.py · jupiter.py · b2500.py · battery.py
               venus3_cli.py (whole-device commands, CT meter, HTTP house)
   modbus.py · uartbridge.py · b2500bus.py · extmodule.py (a real Wi-Fi module on a serial port)
+  ui/        session.py (a device run for the dashboard) · server.py · addon.py · static/ (the page)
   profiles.py · emulator.py · cli.py
   data/       register maps generated from SVD files
-docs/         use-cases · devices · interfaces · library (Python API) · internals · STATUS (firmware survey)
+ha_addon/     the Home Assistant add-on (config.yaml, Dockerfile)
+docs/         ui · use-cases · devices · interfaces · library (Python API) · internals · STATUS (firmware survey)
 tests/        unit tests · test_firmware.py (pytest -m firmware)
 tools/        svd2json.py · survey.py · compare_astrameter.py
 ```
