@@ -1,5 +1,5 @@
 name: marsemu
-version: "0.2.4"
+version: "0.2.5"
 slug: marsemu
 description: An emulated Marstek battery running its own firmware, with an X-ray dashboard
 url: https://github.com/tomquist/marsemu
@@ -7,6 +7,8 @@ arch:
   - aarch64
   - amd64
 init: false
+# seconds Home Assistant waits after SIGTERM: stopping a device saves its state
+timeout: 30
 startup: application
 boot: auto
 ingress: true

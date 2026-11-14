@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import threading
 import time
 import urllib.error
@@ -95,6 +96,18 @@ def follow_load(app: UiApp, entity: str, period: float = 5.0) -> None:
 
 
 def main() -> int:
+    # Home Assistant stops the add-on with SIGTERM.  This process is PID 1 in the
+    # container (init: false), and PID 1 gets no default action for SIGTERM: without
+    # a handler the signal does nothing, the Supervisor kills it after its timeout,
+    # and the add-on shows an error.  Handled from the start, so a stop
+    # during start-up counts too.
+    stop = threading.Event()
+
+    def on_signal(signum, _frame) -> None:
+        log.info("stopping (%s)", signal.Signals(signum).name)
+        stop.set()
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
     # the emulator's own loggers are chatty at INFO and slow it down: only ours
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
     for name in ("marsemu.addon", "marsemu.ui"):
@@ -125,12 +138,11 @@ def main() -> int:
     if opts.get("house_load_entity"):
         threading.Thread(target=follow_load, args=(app, opts["house_load_entity"]), daemon=True).start()
     try:
-        while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        pass
+        while not stop.wait(3600):
+            pass
     finally:
-        app.stop()
+        app.stop()                                  # saves the device's state
+        log.info("stopped")
     return 0
 
 
