@@ -12,7 +12,7 @@ from .fc41d.module import Fc41d, Fc41dConfig
 from .fc41d.net import Network
 from .periph import n32g45x
 from .periph.n32g45x import UartDevice
-from .analysis.idle import find_idle_loop
+from .analysis.idle import find_idle_loop, find_watchdog_waits
 from .profiles import PROFILES, Profile, detect, load_base
 
 log = logging.getLogger("emu")
@@ -150,6 +150,10 @@ class Emulator:
         self.idle_loop = find_idle_loop(image, self.base) if idle_skip else None
         if self.idle_loop:
             m.set_idle_loop(self.idle_loop)
+        #: delay loops that only reload the watchdog, skipped the same way
+        self.watchdog_waits = find_watchdog_waits(image, self.base) if idle_skip else []
+        for addr in self.watchdog_waits:
+            m.set_idle_loop(addr, feeds_watchdog=True)
         m.reset()
         if uart:
             self.bind_fc41d(uart)

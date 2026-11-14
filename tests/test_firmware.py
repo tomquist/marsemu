@@ -760,3 +760,123 @@ def test_b2500_holds_its_output_while_a_detecting_battery_reports_discharge():
         assert b.ac_power > steady + 200, f"held at {b.ac_power:.0f} W without x_dchrg"
     finally:
         b.close()
+
+
+@pytest.mark.firmware
+def test_ui_session_b2500_steers_and_logs_every_bus():
+    """The dashboard's session around a B2500: the firmware steers the grid to
+    about 0 W, and every bus the dashboard draws shows up in its log."""
+    import time
+    from marsemu.ui.session import B2500Session
+    files = sorted(glob.glob(f"{FW}/HMJ-2/V116/*.bin"))
+    if not files:
+        pytest.skip("B2500 HMJ-2 V116 not available")
+    s = B2500Session(files[0], pv=(300, 280), load=420, speed=0)
+    s.start()
+    try:
+        deadline = time.time() + 600
+        while s.read()["snapshot"]["t"] < 80 and time.time() < deadline:
+            time.sleep(0.5)
+        r = s.read()
+    finally:
+        s.stop()
+    snap = r["snapshot"]
+    assert snap["error"] is None
+    assert snap["version"] == "116" and snap["device_type"] == "HMJ-2"
+    assert abs(snap["grid"]) < 60, snap["grid"]
+    assert {"USART1", "RF", "MQTT", "I2C2", "UART5"} <= {e["ch"] for e in r["events"]}
+    assert snap["mcu"]["regs"]["TIM8_CCR3"] and snap["mcu"]["irqs"]
+    assert len(r["history"]) > 100
+
+
+UI_SESSIONS = [
+    ("venusd", "VNSD-0/Control/151", "VNSD-0/BMS/118"),
+    ("venusa", "VNSA-0/Control/151", "VNSA-0/BMS/115"),
+    ("jupiter-cplus", "JPLS-8H/143", "JPLS-8H/37"),
+    ("jupiter-bms-model", "JPLS-8H/143", None),
+]
+
+
+@pytest.mark.firmware
+@pytest.mark.parametrize("name,control,bms", UI_SESSIONS, ids=[u[0] for u in UI_SESSIONS])
+def test_ui_session_steers(name, control, bms):
+    """The dashboard's sessions for the Venus D and A and the Jupiter: the
+    firmware steers the grid to about 0 W and the CAN bus is decoded."""
+    import time
+    from marsemu.ui import session as S
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    ctl = sorted(glob.glob(f"{EXTRA}/**/{control}/*.bin", recursive=True))
+    bmi = sorted(glob.glob(f"{EXTRA}/**/{bms}/*.bin", recursive=True)) if bms else [None]
+    if not ctl or not bmi:
+        pytest.skip(f"{control} / {bms} not in the archive")
+    cls = {"venusd": S.VenusDSession, "venusa": S.VenusASession}.get(name, S.JupiterSession)
+    s = cls(ctl[0], bms=bmi[0], pv=(300, 300, 0, 0), load=500, speed=0)
+    s.start()
+    try:
+        deadline = time.time() + 900
+        while s.read()["snapshot"]["t"] < 90 and time.time() < deadline:
+            time.sleep(0.5)
+        r = s.read()
+    finally:
+        s.stop()
+    snap = r["snapshot"]
+    assert snap["error"] is None and snap["version"]
+    assert abs(snap["grid"]) < 60, snap["grid"]
+    assert snap["mppt"]["dc"] > 0
+    dirs = snap["can"]["by_dir"]
+    assert dirs.get("control→inverter") and dirs.get("BMS→control") and dirs.get("control→MPPT")
+    assert snap["bms"]["real"] == (bms is not None)
+
+
+@pytest.mark.firmware
+def test_ui_ct_session_answers_batteries():
+    """The CT meter's own firmware answers the virtual batteries' polls,
+    counting them per phase, with the grid its clamps measure through the
+    metering chip: 600 W of house over three phases, 300 W from each battery."""
+    import time
+    from marsemu.ui.session import CtSession
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/HME-4/124/*.bin", recursive=True))
+    if not files:
+        pytest.skip("CT002 HME-4 V124 not in the archive")
+    s = CtSession(files[0], batteries=2, battery_w=300, load=600, speed=0)
+    s.start()
+    try:
+        deadline = time.time() + 300
+        while s.read()["snapshot"]["t"] < 30 and time.time() < deadline:
+            time.sleep(0.5)
+        snap = s.read()["snapshot"]
+    finally:
+        s.stop()
+    assert snap["meter"]["replies"] >= 5
+    assert [b["replies"] > 0 for b in snap["batteries"]] == [True, True]
+    assert snap["meter"]["last"][8:10] == ["1", "1"]          # one battery on phase A, one on B
+    assert snap["meter"]["clamps"] == {"A": -100.0, "B": -100.0, "C": 200.0}
+    assert [int(v) for v in snap["meter"]["last"][4:8]] == [-100, -100, 200, 0]
+
+
+@pytest.mark.firmware
+def test_ui_ct003_session_reads_the_p1_meter():
+    """The CT003 is a P1 reader: once its P1 line idles high it reads the
+    utility meter's telegrams on USART3 and answers the batteries with them."""
+    import time
+    from marsemu.ui.session import CtSession
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/HME-3/122/*.bin", recursive=True))
+    if not files:
+        pytest.skip("CT003 HME-3 V122 not in the archive")
+    s = CtSession(files[0], batteries=2, battery_w=300, load=600, speed=0)
+    s.start()
+    try:
+        deadline = time.time() + 300
+        while s.read()["snapshot"]["t"] < 30 and time.time() < deadline:
+            time.sleep(0.5)
+        snap = s.read()["snapshot"]
+    finally:
+        s.stop()
+    assert snap["meter"]["type"] == "HME-3" and snap["meter"]["source"] == "p1"
+    assert snap["meter"]["last"][0] == "HME-3" and len(snap["meter"]["last"]) == 28
+    assert [int(v) for v in snap["meter"]["last"][4:8]] == [-100, -100, 200, 0]

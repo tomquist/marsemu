@@ -236,3 +236,57 @@ AstraMeter's steering model on every step, the charge from an export and the
 800 W cap. The main difference is just after phase detection: the firmware
 steers on the next poll with the reading taken during the probe and swings to
 the opposite of the probe for 2–6 s, which the model does later and shorter.
+
+### The meter side: the CT002 and CT003 firmware against AstraMeter's CT002
+
+The meters' firmware sees whatever grid you give it through `emu.ct_meter`.
+Both models take `emu.ct_meter.set_power(a, b, c)`, in watts per phase.
+
+* **CT002 (HME-4)** measures with clamps and a Belling BL09xx metering chip.
+  Its firmware drives the chip over bit-banged SPI (`marsemu/periph/bl_spi.py`).
+  * Phase power is registers 0x22–0x24, at 134.193 counts per watt.
+  * The firmware cuts each phase to whole watts and adds the unrounded phases
+    for the total.
+  * The RMS currents, voltages and energy counters only reach its cloud report
+    (every 300 s). They are not mapped yet.
+* **CT003 (HME-3)** is a P1 reader: it parses the utility meter's DSMR
+  telegrams (`marsemu/periph/p1.py`).
+  * It waits for its P1 line (PB11, USART3's receive pin) to idle high for 2 s,
+    which means a meter is connected.
+  * Then it reads USART3 at 115200 baud, from `/` to `!`.
+  * It picks out total and per-phase import and export power (`1-0:1.7.0`,
+    `2.7.0`, `21.7.0`/`22.7.0`, `41.7.0`/`42.7.0`, `61.7.0`/`62.7.0`) and the
+    four tariff energy registers (`1.8.1`, `1.8.2`, `2.8.1`, `2.8.2`). The
+    energy registers go into reply fields 25–28.
+  * The model sends a DSMR 5 telegram every second with the power you set and
+    the energy it adds up to. `set_connected(False)` unplugs it.
+
+`tools/compare_ct002.py` puts AstraMeter's `CT002` (with `active_control`
+off, so it reports and doesn't steer) next to the firmware in one process, on
+the emulator's clock. It sends both the same polls from three batteries over a
+280 s scenario: grid steps, imports and exports, a battery changing phase, an
+inspection-mode reporter, the combined `D` phase, and a battery that goes
+quiet for 40 s. Then it compares every reply field:
+
+```bash
+python tools/compare_ct002.py CT002.bin --astrameter /path/to/AstraMeter/src [--json polls.json]
+```
+
+Against CT002 V124 and AstraMeter at the time of writing, all 589 replies agree
+on every field (phase and total power, batteries per phase, charge and
+discharge sums, the energy fields) except:
+
+* **Reply timing.** The firmware answers 0.5–1.5 s after a poll (median
+  0.7 s), with what it knows by then, while AstraMeter answers at once. A grid
+  step, or another battery's new report, inside that window shows up in one
+  answer and not the other. The tool counts these as transition.
+* **A battery that goes quiet.** The firmware still counted the silent battery,
+  with its last reported power, when it came back 40 s later. AstraMeter's
+  adaptive eviction drops it after about two of its poll periods.
+
+Against CT003 V122, the same 589 polls agree on the same fields, with the same
+two differences. The CT003's reply also has 28 fields, not 24. Fields 25–28
+are the P1 meter's tariff energy registers (`1.8.1`, `1.8.2`, `2.8.1`,
+`2.8.2`), in units of 0.1 Wh: 1234.567 kWh is sent as 12345670. AstraMeter
+leaves these four fields empty, because it has no smart meter to read them
+from.

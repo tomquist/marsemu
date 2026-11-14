@@ -18,6 +18,14 @@ realistic battery for EMS software such as
 [hame-relay](https://github.com/tomquist/hame-relay), or for a Home Assistant
 Modbus integration.
 
+![A B2500 booting in the marsemu dashboard](docs/images/boot-b2500.webp)
+
+*A B2500 (HMA-1, firmware V232) booting in the [dashboard](#dashboard), an
+unedited screen recording: it starts its peripherals, uploads its certificates
+to the Wi‑Fi module, joins Wi‑Fi, finds its CT002, connects to MQTT and steers
+the grid to 0 W. The busy first seconds of the boot emulate at about half real
+time (the header says how fast); after that it runs in real time.*
+
 > marsemu is an independent project, not affiliated with or endorsed by Hame or
 > Marstek. It ships no firmware: you run your device's own firmware. See
 > [Getting firmware](#getting-firmware) and [Legal](#legal).
@@ -68,6 +76,10 @@ pip install git+https://github.com/tomquist/marsemu      # Python 3.10+; or pip 
 docker pull ghcr.io/tomquist/marsemu:main                # or docker build -t marsemu .
 ```
 
+In Home Assistant, add `https://github.com/tomquist/marsemu` as an add-on
+repository and install **marsemu**: the dashboard below, in the sidebar, with
+the battery on Home Assistant's MQTT broker ([details](docs/ui.md#home-assistant-add-on)).
+
 ## Getting firmware
 
 marsemu ships no firmware: you run the firmware of your own device. There are
@@ -98,6 +110,18 @@ the Venus split into `Control/` and `BMS/`). `marsemu info` tells you whether
 an image is supported; [`docs/STATUS.md`](docs/STATUS.md) lists the images
 tested so far. The images are the manufacturer's copyrighted software: see
 [Legal](#legal).
+
+## Dashboard
+
+```bash
+marsemu ui HMJ-2/116/*.bin                  # then open http://127.0.0.1:8080/
+```
+
+An X-ray view of the running device: its boards, chips and cells, the power
+flowing between them, every bus message, the registers the firmware writes,
+and controls for load, sun, faults and speed. Every device: B2500, Venus E 3.0, D, A
+and C/E, Jupiter C/E and C Plus, CT002/CT003. See
+[docs/ui.md](docs/ui.md).
 
 ## Quick start
 
@@ -139,6 +163,7 @@ The image runs `marsemu` in `/firmware`; mount the images there:
 docker run --rm -v "$PWD/firmwares:/firmware:ro" ghcr.io/tomquist/marsemu:main info HMJ-2/116/116_HMJ-2_202508051050536604e3965.bin
 docker run --rm -p 8090:8090 -v "$PWD/firmwares:/firmware:ro" ghcr.io/tomquist/marsemu:main \
     b2500 HMJ-2/116/116_HMJ-2_202508051050536604e3965.bin --pv 300,300 --load 300 --realtime
+docker run --rm -p 8080:8080 -v "$PWD/firmwares:/firmware" ghcr.io/tomquist/marsemu:main ui --host 0.0.0.0
 ```
 
 To script it from Python, see [docs/library.md](docs/library.md).
@@ -164,6 +189,7 @@ supported firmware versions and how faithful the models are:
 
 ## Documentation
 
+* [Dashboard](docs/ui.md): `marsemu ui`, the Home Assistant add-on, and its API
 * [Use cases](docs/use-cases.md): examples by task, with the options that do them
 * [Devices](docs/devices.md): each device's real firmware and models, stacked
   packs, supported firmware versions, and how well each part is modelled

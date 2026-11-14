@@ -1,0 +1,43 @@
+configuration:
+  image:
+    name: Firmware image
+    description: File name of the image to start. Empty starts the only supported image in the firmware folder, or waits for you to pick one in the dashboard.
+  mqtt:
+    name: MQTT
+    description: home_assistant connects the emulated device to Home Assistant's MQTT broker (the Mosquitto add-on), custom to the broker below, offline keeps its MQTT traffic inside the add-on.
+  mqtt_host:
+    name: Broker address
+    description: Host name or IP address of your MQTT broker, for MQTT custom.
+  mqtt_port:
+    name: Broker port
+    description: Port of your MQTT broker (plain MQTT, usually 1883).
+  mqtt_user:
+    name: Broker user
+    description: User name, if your broker needs one.
+  mqtt_password:
+    name: Broker password
+    description: Password, if your broker needs one.
+  house_load_entity:
+    name: House load sensor
+    description: A power sensor (W or kW) with your household consumption. The emulated house then draws what your house draws.
+  load_w:
+    name: House load
+    description: House load in W when no sensor is set.
+  pv1_w:
+    name: PV 1
+    description: Available power on PV input 1, in W.
+  pv2_w:
+    name: PV 2
+    description: Available power on PV input 2, in W.
+  soc:
+    name: State of charge
+    description: Charge of the pack when a device starts, in %.
+  extension_packs:
+    name: Extension packs
+    description: Number of extension packs on the extension bus (0 to 2).
+  speed:
+    name: Speed limit
+    description: Emulated seconds per second at most. 1 is real time; 0 runs as fast as the host can.
+  meter:
+    name: CT meter
+    description: local answers the battery's CT002 polls from the emulated house. HOST:PORT sends them to a CT002 emulator such as AstraMeter instead.
