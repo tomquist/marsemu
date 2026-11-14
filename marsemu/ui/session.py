@@ -216,6 +216,7 @@ class DeviceSession:
 
         def udp(sock, data: bytes, dest) -> None:
             self.ct["polls"] += 1
+            self._ct_last_poll = self.dev.time
             if self.faults["ct"] or self.faults["wifi"]:
                 self._log("RF", "FC41D→CT002", f"UDP poll to {dest[0]}:{dest[1]}, no answer (meter offline)")
                 return
@@ -231,6 +232,29 @@ class DeviceSession:
                 self._log("RF", "CT002→FC41D", f"A {g['A']:+.0f} W  B {g['B']:+.0f} W  C {g['C']:+.0f} W")
                 orig_answer(sock, f, dest)
             self.meter._answer = answer
+        self._ct_last_poll = None
+        self._ct_quiet = False
+        self.dev.sim.every(1.0, self._watch_ct)
+
+    def _watch_ct(self, now: float) -> None:
+        """Say in the console when the firmware stops polling its CT002, and why it
+        might have: the module's Wi-Fi, its UDP socket, the faults."""
+        last = self._ct_last_poll
+        if last is None:
+            return
+        quiet = now - last > 10.0
+        if quiet and not self._ct_quiet:
+            mod = self.emu.fc41d
+            udp = [s for s in mod.sockets.values() if str(getattr(s, "kind", "")).startswith("UDP")]
+            why = [f"Wi-Fi {'up' if mod.wifi_up else 'down'}",
+                   f"UDP socket {'open' if udp else 'closed'}",
+                   f"MQTT {'connected' if any(m.connected for m in mod.mqtt.values()) else 'not connected'}"]
+            why += [f"fault: {k}" for k, on in self.faults.items() if on]
+            self._log("ALARM", "", f"CT002: no poll from the firmware for 10 s (last at t={last:.1f} s) · " + " · ".join(why))
+            self._ct_quiet_since = last
+        elif not quiet and self._ct_quiet:
+            self._log("EVT", "", f"CT002: the firmware polls again, after {now - self._ct_quiet_since:.0f} s without")
+        self._ct_quiet = quiet
 
     def _app_poll(self, now: float) -> None:
         if self.sub_topic and not self.faults["wifi"]:
