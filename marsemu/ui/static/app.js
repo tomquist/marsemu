@@ -708,7 +708,11 @@ function renderCt() {
   V.mcuD.textContent = `IRQ ${(irq / 1000).toFixed(2)}k/s · id ${me.id}`;
   V.flash.textContent = "factory data:"; V.flash2.textContent = "certificate, key (empty)";
   const last = me.last || [];
-  [["A", 4], ["B", 5], ["C", 6]].forEach(([k, i]) => { V["cl" + k].textContent = `${last[i] ?? 0} W`; V["cl" + k + "2"].textContent = "input not modelled"; });
+  const cl = me.clamps;
+  [["A", 4], ["B", 5], ["C", 6]].forEach(([k, i]) => {
+    V["cl" + k].textContent = `${last[i] ?? 0} W`;
+    V["cl" + k + "2"].textContent = cl ? `clamp ${sgn(cl[k])} W` : "input not modelled";
+  });
   for (let k = 1; k <= 3; k++) {
     const b = bats[k - 1], on = !!b;
     $("m-bat" + k).style.opacity = on ? 1 : .3;
@@ -802,7 +806,7 @@ function renderB2500() {
 function renderHudCt() {
   const me = SN.meter, bats = SN.batteries || [], last = me.last || [];
   const cell = (id, v, u, note, color) => { $(id).innerHTML = `${v}<u>${u}</u>`; $(id).style.color = color || ""; $(id + "N").textContent = note; };
-  cell("hGrid", last[7] ?? 0, "W", "total in the last answer (clamps not modelled)");
+  cell("hGrid", last[7] ?? 0, "W", SN.meter.clamps ? "total in the last answer" : "total in the last answer (clamps not modelled)");
   cell("hAc", sum(bats.map((b) => b.w)), "W", `reported by ${bats.length} batteries`, "var(--discharge)");
   cell("hPv", me.replies, "", "answers to battery polls", "var(--xray)");
   cell("hBat", last.slice(8, 11).join("/") || "–", "", "batteries per phase A/B/C");
@@ -1024,7 +1028,12 @@ function inspectCt() {
     return kv([["Device type", b.type], ["MAC", b.mac], ["Phase", b.phase], ["Reports", `${Math.round(b.w)} W`], ["Answers", b.replies]])
       + (b.last ? regs([["A / B / C", `${b.last[4]} / ${b.last[5]} / ${b.last[6]} W`], ["batteries per phase", b.last.slice(8, 11).join(" / ")]], "Its last answer", "") : "");
   }
-  if (sel.startsWith("clamp")) return kv([["Measured", "0 W (not modelled)"], ["In the answers", `${last[{ clampA: 4, clampB: 5, clampC: 6 }[sel]] ?? 0} W`]]);
+  if (sel.startsWith("clamp")) {
+    const ph = sel.slice(-1), cl = SN.meter.clamps;
+    return kv([["Measured", cl ? `${sgn(cl[ph])} W (house ${Math.round(SN.meter.house_load / 3)} W minus batteries on ${ph})` : "0 W (not modelled)"],
+      ["In the answers", `${last[{ clampA: 4, clampB: 5, clampC: 6 }[sel]] ?? 0} W`],
+      ["Path", cl ? "metering chip (BL09xx, bit-banged SPI) → firmware" : "–"]]);
+  }
   if (sel === "fc41d") return kv([["Module firmware", esc(SN.fc41d.version)], ["Wi‑Fi", SN.fc41d.wifi ? "connected" : "disconnected"], ["UDP service", me.socket ? "port 12345" : "not open yet"], ["BLE name", esc(SN.fc41d.ble || "–")], ["Command topic", esc(SN.sub_topic || "–")]]);
   if (sel === "broker") { const s0 = (SN.fc41d.mqtt || [])[0]; return kv([["Session", s0 ? `${s0.connected ? "connected" : "closed"} · ${esc(s0.host)}:${s0.port}` : "none"]]); }
   return "";
@@ -1359,7 +1368,7 @@ const TRACE_CE = [
 const TRACE_CT = [
   { h: "A battery polls the meter", p: () => `Every 2.7 s each battery sends a UDP poll to port 12345 with its phase and the power it delivers. ${(SN.batteries || []).length} are polling.`, hl: ["m-bat1", "rfbat1", "ant", "m-fc41d"], sel: "bat1", go: () => capsule("rfbat1", -1, "poll") },
   { h: "The module hands it over", p: () => "The Wi‑Fi module passes the datagram to the meter's MCU on USART1 (+QIURC, then AT+QIRD).", hl: ["m-fc41d", "usart", "m-mcu"], sel: "fc41d", go: () => capsule("usart", -1, "+QIURC") },
-  { h: "The firmware answers", p: () => `Real firmware: grid per phase (0 W, the clamps are not modelled), the total, how many batteries report on each phase (${((SN.meter.last || []).slice(8, 11).join("/")) || "–"}), its RSSI.`, hl: ["m-mcu", "m-clampA", "m-clampB", "m-clampC", "adcA", "adcB", "adcC"], sel: "mcu" },
+  { h: "The firmware answers", p: () => `Real firmware: grid per phase (${SN.meter.clamps ? "read from the metering chip" : "0 W, the clamps are not modelled"}), the total, how many batteries report on each phase (${((SN.meter.last || []).slice(8, 11).join("/")) || "–"}), its RSSI.`, hl: ["m-mcu", "m-clampA", "m-clampB", "m-clampC", "adcA", "adcB", "adcC"], sel: "mcu" },
   { h: "The answer goes back", p: () => `AT+QISEND, then UDP to the battery. ${SN.meter.replies} answers so far.`, hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfbat1", "m-bat1"], sel: "bat1", go: () => capsule("rfbat1", 1, "answer") },
   { h: "It reports to the cloud stand-in", p: () => "Over MQTT and HTTP the meter reports what it measures and how many batteries it serves; marsemu answers both locally.", hl: ["m-mcu", "usart", "m-fc41d", "ant", "rfbroker", "m-broker"], sel: "broker" },
 ];
@@ -1430,7 +1439,9 @@ function buildLayout(model, channels) {
   document.querySelectorAll(".only-nopv").forEach((e) => { e.hidden = pv || ct; });
   document.querySelectorAll(".only-ct").forEach((e) => { e.hidden = !ct; });
   document.querySelectorAll(".only-house").forEach((e) => { e.hidden = ct; });
-  $("houseHead").textContent = ct ? "Batteries" : pv ? "House and sun" : "House";
+  // a CT002's clamps see the house: its load is a control there too
+  $("sLoad").parentElement.hidden = ct && !(SN && SN.meter && SN.meter.clamps);
+  $("houseHead").textContent = ct ? "House and batteries" : pv ? "House and sun" : "House";
   $("scStep").hidden = ct; $("fHot").parentElement.hidden = ct; $("fCt").parentElement.hidden = ct;
   if (channels) buildFilters(channels);
   sel = "mcu";

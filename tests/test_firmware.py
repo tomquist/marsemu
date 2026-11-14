@@ -832,7 +832,8 @@ def test_ui_session_steers(name, control, bms):
 @pytest.mark.firmware
 def test_ui_ct_session_answers_batteries():
     """The CT meter's own firmware answers the virtual batteries' polls,
-    counting them per phase."""
+    counting them per phase, with the grid its clamps measure through the
+    metering chip: 600 W of house over three phases, 300 W from each battery."""
     import time
     from marsemu.ui.session import CtSession
     if not EXTRA:
@@ -840,7 +841,7 @@ def test_ui_ct_session_answers_batteries():
     files = sorted(glob.glob(f"{EXTRA}/**/HME-4/124/*.bin", recursive=True))
     if not files:
         pytest.skip("CT002 HME-4 V124 not in the archive")
-    s = CtSession(files[0], batteries=2, speed=0)
+    s = CtSession(files[0], batteries=2, battery_w=300, load=600, speed=0)
     s.start()
     try:
         deadline = time.time() + 300
@@ -852,3 +853,5 @@ def test_ui_ct_session_answers_batteries():
     assert snap["meter"]["replies"] >= 5
     assert [b["replies"] > 0 for b in snap["batteries"]] == [True, True]
     assert snap["meter"]["last"][8:10] == ["1", "1"]          # one battery on phase A, one on B
+    assert snap["meter"]["clamps"] == {"A": -100.0, "B": -100.0, "C": 200.0}
+    assert [int(v) for v in snap["meter"]["last"][4:8]] == [-100, -100, 200, 0]

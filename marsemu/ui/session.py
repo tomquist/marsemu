@@ -940,8 +940,10 @@ class _MeterDevice:
 
 class CtSession(DeviceSession):
     """A CT002/CT003 meter: its firmware with the Wi‑Fi module model, polled by
-    virtual batteries the way real ones poll it.  Its current clamps are not
-    modelled, so it measures 0 W; its answers are the firmware's own."""
+    virtual batteries the way real ones poll it; its answers are the firmware's
+    own.  On a CT002 the clamps see the house (its load spread over the three
+    phases) minus what each battery delivers on its phase, through the modelled
+    metering chip; the CT003's measurement is not modelled (0 W)."""
 
     MODEL = "CT002 / CT003"
     HAS_PACK = False
@@ -958,7 +960,8 @@ class CtSession(DeviceSession):
         self.n_batteries = max(0, min(3, int(batteries)))
         self.replies = 0
         self.last_reply: Optional[List[str]] = None
-        kw["load"] = 0.0                                        # a meter has no house of its own here
+        self.house_load = float(kw.get("load", 400.0))
+        kw["load"] = 0.0                                        # the clamps below are the house
         super().__init__(firmware, **kw)
 
     def _build(self, control_kwargs: dict, soc: float, **_):
@@ -988,6 +991,21 @@ class CtSession(DeviceSession):
             return orig(s, data, extra)
         net.socket_send = send
         self.dev.sim.every(self.POLL_S, self._poll)
+        self.clamps = getattr(self.emu, "ct_meter", None)
+        if self.clamps is not None:
+            self.dev.sim.every(0.2, self._feed_clamps)
+
+    def clamp_power(self) -> Dict[str, float]:
+        """Grid per phase as the clamps see it: house load minus battery output."""
+        g = {ph: self.house_load / 3 for ph in "ABC"}
+        for b in self.batteries[:self.n_batteries]:
+            if b["phase"] in g:
+                g[b["phase"]] -= b["w"]
+        return g
+
+    def _feed_clamps(self, now: float) -> None:
+        g = self.clamp_power()
+        self.clamps.set_power(g["A"], g["B"], g["C"])
 
     def _service_socket(self) -> Optional[int]:
         for sid, s in self.emu.fc41d.sockets.items():
@@ -1015,7 +1033,10 @@ class CtSession(DeviceSession):
             for b in self.batteries:
                 b["w"] = float(c["w"])
             return True
-        if op in ("load", "pv", "ambient", "scenario"):
+        if op == "load":
+            self.house_load = max(0.0, float(c["w"]))
+            return True
+        if op in ("pv", "ambient", "scenario"):
             return True                                         # nothing to drive on a meter
         return False
 
@@ -1024,11 +1045,16 @@ class CtSession(DeviceSession):
         num = lambda i: float(f[i]) if len(f) > i and f[i].lstrip("-").isdigit() else 0.0
         # the charts' other series have nothing to show on a meter: zeros keep them drawable
         return {"grid": num(7), "ac": sum(b["w"] for b in self.batteries[:self.n_batteries]), "pv": 0.0,
+                "load": self.house_load if self.clamps is not None else 0.0,
                 "bat": 0.0, "soc": 0.0, "v": 0.0, "cmin": 0.0, "cmax": 0.0, "bal": False, "replies": self.replies}
 
     def _device_snapshot(self) -> dict:
         return {"meter": {"id": self.ct_id, "replies": self.replies, "last": self.last_reply,
-                          "socket": self._service_socket() is not None, "clamps": "not modelled (0 W)"},
+                          "socket": self._service_socket() is not None,
+                          "clamps": ({k: round(v, 1) for k, v in self.clamp_power().items()}
+                                     if self.clamps is not None else None),
+                          "house_load": self.house_load},
+                "load": self.house_load,
                 "batteries": [{k: v for k, v in b.items()} for b in self.batteries[:self.n_batteries]]}
 
 

@@ -128,6 +128,40 @@ class GpioSpiSlave:
             self.chip.write(b[1], value)
 
 
+class BlMeter:
+    """What the CT002's clamps see, written into the chip's registers.
+
+    Found by setting one register at a time on CT002 V120/V124 and reading the
+    meter's answers to a battery:
+
+    * 0x22, 0x23, 0x24: active power of phases A, B and C, signed 24 bits,
+      about 134.17 counts per watt (the firmware's scale with the calibration
+      it writes at start-up), cut toward zero to whole watts.  A full-scale
+      reading (0x7FFFFF or 0x800000) comes out as 3025 W.
+    * Every other register the firmware reads (RMS currents and voltages,
+      energy counters, frequency) feeds only its cloud report.
+    """
+
+    POWER_REGS = {"A": 0x22, "B": 0x23, "C": 0x24}
+    COUNTS_PER_W = 134.17
+
+    def __init__(self, chip: BlChip):
+        self.chip = chip
+        self.power = {"A": 0.0, "B": 0.0, "C": 0.0}
+        self.set_power(0.0, 0.0, 0.0)
+
+    def set_power(self, a: float, b: float, c: float) -> None:
+        """Grid power per phase in watts, + import, - export.  The firmware
+        reports whole watts: the register is put in the middle of the step so
+        it reports ``round(w)``."""
+        for ph, w in zip("ABC", (a, b, c)):
+            self.power[ph] = float(w)
+            whole = round(w)
+            counts = round((whole + (0.5 if whole >= 0 else -0.5)) * self.COUNTS_PER_W)
+            counts = max(-0x7FFFFF, min(0x7FFFFE, counts))
+            self.chip.regs[self.POWER_REGS[ph]] = counts & 0xFFFFFF
+
+
 def attach_ct_meter(emu) -> Optional[BlChip]:
     """Give a CT00x its metering chip (GPIOA PA4-PA7)."""
     gpio = emu.machine.bus.peripherals.get("GPIOA")
@@ -136,4 +170,5 @@ def attach_ct_meter(emu) -> Optional[BlChip]:
     chip = BlChip()
     emu.meter_chip = chip
     emu.meter_spi = GpioSpiSlave(gpio, chip)
+    emu.ct_meter = BlMeter(chip)
     return chip
