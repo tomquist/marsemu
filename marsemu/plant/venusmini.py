@@ -156,6 +156,52 @@ class FrameParser:
             yield f[1], f[2], f[5], f[6:-2]
 
 
+#: The control's resting-voltage tables (Control 309, at 0x08030656): the mean
+#: cell voltage (mV) at 100, 99, ..., 0 % SOC, at 0, 20 and 30 degC.  The
+#: control picks or interpolates them by its hottest cell's temperature and
+#: estimates its starting SOC from them; the Mini's cells take them as their
+#: open-circuit voltage, so that estimate matches the pack's SOC.  Copied from
+#: the firmware with the maintainer's permission.
+MINI_OCV_TEMPS = (0.0, 20.0, 30.0)
+MINI_OCV_MV = (
+    (3380, 3334, 3333, 3332, 3331, 3330, 3330, 3329, 3328, 3327, 3326, 3325, 3324, 3323, 3322, 3322, 3321, 3320, 3319,
+     3318, 3317, 3316, 3315, 3314, 3314, 3313, 3312, 3311, 3310, 3309, 3308, 3307, 3306, 3305, 3305, 3304, 3303, 3302,
+     3301, 3300, 3299, 3298, 3297, 3297, 3296, 3295, 3294, 3293, 3292, 3291, 3290, 3289, 3289, 3288, 3287, 3286, 3285,
+     3284, 3283, 3282, 3281, 3281, 3280, 3279, 3278, 3277, 3274, 3272, 3269, 3267, 3264, 3261, 3259, 3256, 3253, 3249,
+     3246, 3243, 3239, 3235, 3231, 3227, 3223, 3219, 3215, 3210, 3205, 3200, 3195, 3190, 3184, 3178, 3172, 3166, 3160,
+     3150, 3108, 3060, 2992, 2897, 2787),
+    (3380, 3334, 3333, 3333, 3332, 3331, 3330, 3330, 3329, 3328, 3327, 3327, 3326, 3325, 3324, 3324, 3323, 3322, 3321,
+     3321, 3320, 3319, 3318, 3318, 3317, 3316, 3315, 3315, 3314, 3313, 3312, 3312, 3311, 3310, 3309, 3309, 3308, 3307,
+     3306, 3306, 3305, 3304, 3303, 3303, 3302, 3301, 3300, 3300, 3299, 3298, 3297, 3297, 3296, 3295, 3294, 3294, 3293,
+     3292, 3291, 3291, 3290, 3289, 3288, 3288, 3287, 3286, 3285, 3283, 3280, 3278, 3275, 3272, 3269, 3266, 3262, 3259,
+     3255, 3251, 3248, 3244, 3240, 3235, 3231, 3227, 3223, 3219, 3215, 3211, 3207, 3203, 3199, 3195, 3191, 3188, 3184,
+     3178, 3139, 3095, 3032, 2948, 2838),
+    (3360, 3333, 3332, 3332, 3331, 3330, 3330, 3329, 3328, 3328, 3327, 3326, 3325, 3325, 3324, 3323, 3323, 3322, 3321,
+     3321, 3320, 3319, 3319, 3318, 3317, 3317, 3316, 3315, 3314, 3314, 3313, 3312, 3312, 3311, 3310, 3310, 3309, 3308,
+     3308, 3307, 3306, 3305, 3305, 3304, 3303, 3303, 3302, 3301, 3301, 3300, 3299, 3299, 3298, 3297, 3297, 3296, 3295,
+     3294, 3294, 3293, 3292, 3292, 3291, 3290, 3290, 3289, 3287, 3285, 3283, 3280, 3277, 3274, 3271, 3267, 3264, 3260,
+     3256, 3252, 3248, 3244, 3240, 3236, 3232, 3228, 3228, 3219, 3215, 3211, 3207, 3203, 3200, 3196, 3192, 3189, 3186,
+     3180, 3141, 3097, 3035, 2950, 2840),
+)
+
+
+def mini_ocv(soc: float, temp_c: float) -> float:
+    """Open-circuit voltage (V) of a Mini cell at ``soc`` (0..1) and ``temp_c``,
+    from :data:`MINI_OCV_MV`: linear in SOC between the 1 % points and in
+    temperature between the tables (held at the 0 and 30 degC ones outside)."""
+    t = min(MINI_OCV_TEMPS[-1], max(MINI_OCV_TEMPS[0], temp_c))
+    k = 1 if t <= MINI_OCV_TEMPS[1] else 2
+    t0, t1 = MINI_OCV_TEMPS[k - 1], MINI_OCV_TEMPS[k]
+    w = (t - t0) / (t1 - t0)
+    x = (1.0 - min(1.0, max(0.0, soc))) * 100.0        # table index: 0 = 100 %
+    i = min(99, int(x))
+    f = x - i
+
+    def at(row):
+        return row[i] + (row[i + 1] - row[i]) * f
+    return ((1 - w) * at(MINI_OCV_MV[k - 1]) + w * at(MINI_OCV_MV[k])) / 1000.0
+
+
 def mini_stage(ambient_c: float = 25.0) -> PowerStage:
     """Power-stage dynamics of the Mini (estimates: 800 W slew, 2 s grid
     connect, about 6 % conversion losses at full power through the DC/DC
@@ -435,6 +481,10 @@ class VenusMini:
             for c in self.pack.cells:
                 c.r_ohm, c.rc_r = CELL_R_OHM, c.rc_r * 100.0 / CAPACITY_AH
             self.pack.thermal_mass_j_per_k = 12_000.0
+        if self.pack.capacity_ah == CAPACITY_AH and all(c.ocv_curve is None for c in self.pack.cells):
+            # the Mini's cells rest at the voltages the control's SOC tables give
+            for c in self.pack.cells:
+                c.ocv_curve = lambda soc, pack=self.pack: mini_ocv(soc, pack.temp_c)
         kw = dict(control_kwargs or {})
         kw.setdefault("profile", "venus-mini")
         self.control = Emulator(control, **kw)
@@ -512,4 +562,4 @@ class VenusMini:
         }
 
 
-__all__ = ["VenusMini", "mini_stage", "MiniInverter", "MiniDcdc", "MiniLimits", "FrameParser", "frame", "crc16", "ntc_raw"]
+__all__ = ["VenusMini", "mini_stage", "mini_ocv", "MiniInverter", "MiniDcdc", "MiniLimits", "FrameParser", "frame", "crc16", "ntc_raw"]

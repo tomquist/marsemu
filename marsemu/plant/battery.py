@@ -10,7 +10,7 @@ from __future__ import annotations
 import bisect
 import math
 from dataclasses import dataclass, field
-from typing import List
+from typing import Callable, List, Optional
 
 # Typical LFP (graphite/LiFePO4) OCV curve at 25 degC, SOC -> V.
 LFP_OCV = [
@@ -41,9 +41,12 @@ class Cell:
     rc_r: float = 0.0006           # polarisation
     rc_tau: float = 60.0
     v_rc: float = 0.0
+    #: SOC (0..1) -> open-circuit voltage, V; default: the generic :data:`LFP_OCV`
+    ocv_curve: Optional[Callable[[float], float]] = None
 
     def ocv(self) -> float:
-        return _interp(LFP_OCV, min(1.0, max(0.0, self.soc)))
+        soc = min(1.0, max(0.0, self.soc))
+        return self.ocv_curve(soc) if self.ocv_curve is not None else _interp(LFP_OCV, soc)
 
     def voltage(self, current_a: float) -> float:
         return self.ocv() + current_a * self.r_ohm + self.v_rc

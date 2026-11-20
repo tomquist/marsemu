@@ -127,3 +127,23 @@ def test_cell_temperature_encoding():
         assert ntc_raw(c) == round(c * 10)
     for c in (40.0, 55.5):
         assert abs(0.9 * ntc_raw(c) + 30 - c * 10) < 1
+
+
+def test_mini_cells_rest_at_the_controls_soc_table():
+    """The Mini's cells take the control's resting-voltage tables (0, 20,
+    30 degC) as their OCV, so its SOC estimate at start matches the pack."""
+    from marsemu.plant.venusmini import MINI_OCV_MV, VenusMini, mini_ocv
+    assert mini_ocv(0.5, 20.0) == MINI_OCV_MV[1][50] / 1000
+    assert mini_ocv(0.5, 25.0) == (MINI_OCV_MV[1][50] + MINI_OCV_MV[2][50]) / 2000
+    assert mini_ocv(0.5, -5.0) == mini_ocv(0.5, 0.0) and mini_ocv(0.5, 45.0) == mini_ocv(0.5, 30.0)
+    assert mini_ocv(1.0, 20.0) > mini_ocv(0.5, 20.0) > mini_ocv(0.0, 20.0)
+    pack = LfpPack(cells_n=2, capacity_ah=314, soc=0.42, temp_c=20.0)
+    pack.cells[0].ocv_curve = pack.cells[1].ocv_curve = lambda soc: mini_ocv(soc, pack.temp_c)
+    assert abs(pack.ocv - 2 * mini_ocv(0.42, 20.0)) < 1e-9
+    assert VenusMini.CELLS == 2
+
+
+def test_cells_take_a_curve_of_their_own():
+    from marsemu.plant.battery import LFP_OCV, Cell, _interp
+    assert Cell(100, 0.5).ocv() == _interp(LFP_OCV, 0.5)
+    assert Cell(100, 0.5, ocv_curve=lambda soc: 3.0 + soc).ocv() == 3.5
