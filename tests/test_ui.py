@@ -116,6 +116,10 @@ def test_images_are_classified():
     assert ce["model"] == "Venus C/E" and ce["needs_bms"]
     j = describe("143_JPLS-8H_app.bin", 1, {"profile": "jupiter", "device_types": ["HME-3", "HMM-1", "JPLS-8H"]})
     assert j["model"] == "Jupiter C Plus" and not j["needs_bms"] and j["bms_optional"]
+    mini = describe("309_control_VNSEMINI-0.bin", 1,
+                    {"profile": "venus-mini", "device_types": ["HMC-1", "HME-3", "HME-4", "VNSEM-0", "VNSEMINI-0"]})
+    assert mini["supported"] and mini["model"] == "Venus E Mini" and not mini["needs_bms"]
+    assert mini["device_type"] == "VNSEMINI-0" and mini["pv_inputs"] == 0
     ct = describe("124_HME-4.bin", 1, {"profile": "ct00x", "device_types": ["HME-4"]})
     assert ct["supported"] and ct["model"] == "CT002 / CT003"
     assert describe("115_bms.bin", 1, {"profile": "aux"})["role"] == "bms"

@@ -134,3 +134,41 @@ def test_dma_push_many_matches_single_pushes():
                 ca.push(v)
             cb.push_many(seq)
         assert (a.m.bytes, a.regs, ca.pos, a.irq_checks) == (b.m.bytes, b.regs, cb.pos, b.irq_checks)
+
+
+def test_byte_stores_set_system_handler_and_interrupt_priorities():
+    """uC/OS-III sets PendSV's priority with ``strb 0xff, [0xE000ED22]`` and
+    CMSIS NVIC_SetPriority writes one byte per interrupt: each store changes
+    exactly its own priority (PendSV must end up lowest, or it preempts
+    interrupt handlers and switches tasks inside them)."""
+    m, img = make(thumb(0xE7FE))
+    boot(m, img)
+    m.bus.write(0xE000ED22, 0xFF, 1)            # SHPR3 byte 2: PendSV
+    m.bus.write(0xE000ED1F, 0x80, 1)            # SHPR2 byte 3: SVCall
+    m.bus.write(0xE000E434, 0x60, 1)            # IPR13 byte 0: IRQ52
+    m.bus.write(0xE000E436, 0xA0, 1)            # IPR13 byte 2: IRQ54
+    assert m.nvic.prio[14] == 0xF0 and m.nvic.prio[11] == 0x80
+    assert m.nvic.prio[16 + 52] == 0x60 and m.nvic.prio[16 + 54] == 0xA0 and m.nvic.prio[16 + 53] == 0
+    assert m.bus.read(0xE000ED20) == 0x00F00000
+    # a pending PendSV waits while a higher-priority handler runs
+    assert m.nvic.best_pending(m.nvic.group_prio(0x60)) is None or not m.nvic.pending[14]
+    m.nvic.set_pending(14)
+    assert m.nvic.best_pending(m.nvic.group_prio(0x60)) is None
+    assert m.nvic.best_pending(256) == 14
+
+
+def test_timers_run_at_their_apb_clock():
+    """N32G45x timers count at their APB clock, doubled when the APB is
+    divided: with HCLK 144 MHz and APB1 = HCLK/4 (PPRE1 = 5), TIM2-7 run at
+    72 MHz, so PSC 1 / ARR 35999 is a 1 kHz tick (the Venus E Mini's TIM6);
+    TIM1/TIM8 on APB2 = HCLK/2 (PPRE2 = 4) run at 144 MHz."""
+    m, img = make(thumb(0xE7FE))
+    boot(m, img)
+    m.bus.write(0x40021004, (5 << 8) | (4 << 11))
+    t6, t1 = m.bus.get("TIM6"), m.bus.get("TIM1")
+    for t in (t6, t1):
+        t.write32(0x28, 1)
+        t.write32(0x2C, 35999)
+    assert t6.period() == 144_000 and t1.period() == 72_000
+    m.bus.write(0x40021004, 0)                # undivided APBs: timers at HCLK
+    assert t6.period() == 72_000

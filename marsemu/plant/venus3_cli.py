@@ -246,6 +246,8 @@ def serve_http(port: int, house: House, status, set_pv=None) -> ThreadingHTTPSer
 
 # --------------------------------------------------------------------------- library helpers
 DEFAULT_CT_MAC = "112233445566"
+#: UDP port the CT002/CT003 answers polls on
+CT_UDP_PORT = 12345
 
 
 def connect_house(device, house: House, meter="local", ct_mac: str = DEFAULT_CT_MAC,
@@ -284,7 +286,12 @@ def connect_house(device, house: House, meter="local", ct_mac: str = DEFAULT_CT_
     else:
         host, _, port = meter.rpartition(":")
         m = CtForwarder(device.control, host or meter, int(port or 12345))
-    device.control.fc41d.net.udp_handler = m
+    def to_meter(sock, data: bytes, dest) -> None:
+        # a CT002/CT003 listens on its UDP port only; other broadcasts (the
+        # Venus E Mini announces itself to other Minis on 60606) go unanswered
+        if dest[1] == CT_UDP_PORT:
+            m(sock, data, dest)
+    device.control.fc41d.net.udp_handler = to_meter
     return m
 
 
@@ -322,6 +329,13 @@ def configure_self_consumption(device, ct_mac: str = DEFAULT_CT_MAC, say=None) -
             say("B2500: this build has no CT support; it runs its timers (factory default: 800 W all day)")
             return
         say(f"configuring self-consumption mode and CT {ct_mac} via {t}")
+        if getattr(device, "TWO_DIGIT_COMMANDS", False):
+            # Venus E Mini: two-digit codes, the meter as ct_t (3 = CT002), and a
+            # phase detection (cd=58): it regulates the grid on its own phase only
+            e.mqtt_inject(t, "cd=02,md=0")
+            device.sim.after(2.0, lambda: e.mqtt_inject(t, f"cd=18,ct_t=3,mac={ct_mac}"))
+            device.sim.after(8.0, lambda: e.mqtt_inject(t, "cd=58,dt=1"))
+            return
         if isinstance(device, B2500):
             # the meter command resets the discharge mode: adaptive (md=1) after it
             e.mqtt_inject(t, f"cd=27,meter=3,mac={ct_mac}")
@@ -347,19 +361,22 @@ def configure_self_consumption(device, ct_mac: str = DEFAULT_CT_MAC, say=None) -
 # --------------------------------------------------------------------------- command
 def add_parser(sub) -> None:
     for cmd, model in (("venus3", "Venus E 3.0"), ("venusd", "Venus D"), ("venusa", "Venus A"),
-                       ("jupiter", "Jupiter C/E/C Plus"), ("b2500", "B2500")):
+                       ("jupiter", "Jupiter C/E/C Plus"), ("venusmini", "Venus E Mini"), ("b2500", "B2500")):
         _add(sub, cmd, model)
 
 
 def _add(sub, cmd: str, model: str) -> None:
     what = "firmware, power stage and microinverter models" if cmd == "b2500" else \
+        "control firmware, inverter, DC/DC and battery models" if cmd == "venusmini" else \
         "control + BMS firmware, inverter model"
     v = sub.add_parser(cmd, help=f"run a whole {model} ({what})",
                        description=f"Run a whole {model} ({what}).\n\n" + __doc__.split("\n\n", 1)[1],
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     v.add_argument("control", metavar="FIRMWARE" if cmd == "b2500" else "CONTROL",
                    help=f"{model} {'' if cmd == 'b2500' else 'control '}firmware image")
-    if cmd == "jupiter":
+    if cmd == "venusmini":
+        pass
+    elif cmd == "jupiter":
         v.add_argument("bms", nargs="?", metavar="BMS", help="Jupiter C Plus BMS firmware image (JPLS-8H V37); "
                        "without it a BMS model answers the control")
     elif cmd != "b2500":
@@ -418,6 +435,7 @@ def cmd_venus3(args) -> int:
     from .venusa import VenusA
     from .venusd import VenusD
     from .b2500 import B2500
+    from .venusmini import VenusMini, mini_stage
 
     logging.basicConfig(level=logging.WARNING - 10 * min(args.verbose, 2),
                         format="%(levelname)-7s %(name)s: %(message)s")
@@ -427,12 +445,13 @@ def cmd_venus3(args) -> int:
     host, _, port = args.broker.rpartition(":")
     net = Network(mqtt=args.mqtt, broker=(host or args.broker, int(port or 1883)),
                   broker_auth=tuple(args.broker_auth.split(":", 1)) if args.broker_auth else None)
-    stage = PowerStage(ambient_c=args.temp)
+    stage = mini_stage(args.temp) if args.cmd == "venusmini" else PowerStage(ambient_c=args.temp)
     if args.slew:
         stage.slew_w_per_s = args.slew
     if args.start_delay is not None:
         stage.start_delay_s = args.start_delay
-    cls = {"venusd": VenusD, "venusa": VenusA, "jupiter": Jupiter, "b2500": B2500}.get(args.cmd, VenusE3)
+    cls = {"venusd": VenusD, "venusa": VenusA, "jupiter": Jupiter, "b2500": B2500,
+           "venusmini": VenusMini}.get(args.cmd, VenusE3)
     pack = LfpPack(soc=args.soc / 100.0, temp_c=args.temp, ambient_c=args.temp, capacity_ah=cls.CAPACITY_AH,
                    cells_n=cls.CELLS)
     extra = {"pv": [float(x) for x in args.pv.split(",")]} if hasattr(args, "pv") else {}
@@ -443,7 +462,7 @@ def cmd_venus3(args) -> int:
     if args.cmd == "b2500":
         extra["inverter_w"] = [float(x) for x in args.inverter_w.split(",")]
         extra["extension_packs"] = args.extension_packs
-    images = (args.control,) if args.cmd == "b2500" or (args.cmd == "jupiter" and not args.bms) \
+    images = (args.control,) if args.cmd in ("b2500", "venusmini") or (args.cmd == "jupiter" and not args.bms) \
         else (args.control, args.bms)
     v = cls(*images, pack=pack, stage=stage, realtime=args.realtime,
             control_kwargs={"network": net, "state_dir": args.state_dir, "external_module": args.module_serial},
@@ -479,6 +498,11 @@ def cmd_venus3(args) -> int:
             f"[{v.time:8.1f}] AT< {line}" + ("" if ms is None else f"  (+{ms:.0f} ms)"), flush=True))
     if not args.no_setup:
         configure_self_consumption(v, args.ct_mac, say=lambda text: print(f"[{v.time:8.1f}] {text}", flush=True))
+    if args.cmd == "venusmini" and args.mqtt == "offline":
+        # offline nobody asks for its state: poll like the app, for its SOC in the status line
+        topics: List[str] = []
+        e.on("mqtt_subscribe", topics.append)
+        v.sim.every(30.0, lambda now: topics and e.mqtt_inject(topics[0], "cd=01"))
     jlog = open(args.json_log, "a") if args.json_log else None
 
     def report(now):
@@ -491,7 +515,7 @@ def cmd_venus3(args) -> int:
             bms = ""
         else:
             tail = f"limits {st['limits']}"
-            bms = f" (bms {st['bms_soc']:.1f}%)"
+            bms = f" (bms {st['bms_soc']:.1f}%)" if st.get("bms_soc") is not None else " (bms –)"
         print(f"[{now:8.1f}] ac {st['ac_w']:7.1f} W  {ref}{pv}grid {st['grid'][args.phase]:7.1f} W  "
               f"soc {st['soc']:5.1f}%{bms}  {st['pack_v']:.2f} V  {st['i_a']:6.1f} A  "
               f"{tail}  polls {st['ct_polls']}", flush=True)

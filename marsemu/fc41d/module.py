@@ -156,6 +156,8 @@ class Socket:
     mode: int
     conn: object = None
     rxbuf: bytearray = field(default_factory=bytearray)
+    #: a UDP service socket in buffer access mode keeps whole datagrams with their sender
+    datagrams: list = field(default_factory=list)
     rx_total: int = 0
     tx_total: int = 0
 
@@ -1114,6 +1116,15 @@ class Fc41d(UartDevice):
             self.line(f"+QIRD: {s.rx_total},{s.rx_total - len(s.rxbuf)},{len(s.rxbuf)}")
             self.ok()
             return
+        if s.kind == "UDP SERVICE" and s.datagrams:
+            # one datagram per read, with the address it came from (FC41D AT
+            # manual: +QIRD: <len>,<remote IP>,<remote port> for UDP service)
+            data, addr = s.datagrams.pop(0)
+            data = data[:n]
+            del s.rxbuf[:len(data)]
+            head = f'+QIRD: {len(data)},"{addr[0]}",{addr[1]}' if addr else f"+QIRD: {len(data)}"
+            self.send(f"\r\n{head}\r\n".encode() + data + b"\r\nOK\r\n")
+            return
         data = bytes(s.rxbuf[:n])
         del s.rxbuf[:n]
         self.send(f"\r\n+QIRD: {len(data)}\r\n".encode() + data + b"\r\nOK\r\n")
@@ -1139,6 +1150,8 @@ class Fc41d(UartDevice):
             self.send(data)
         else:
             s.rxbuf.extend(data)
+            if s.kind == "UDP SERVICE":
+                s.datagrams.append((bytes(data), addr))
             self.urc(f'+QIURC: "recv",{sid}')
 
     def socket_closed(self, sid: int) -> None:

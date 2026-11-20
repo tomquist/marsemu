@@ -74,6 +74,30 @@ def test_udp_send_with_trailing_address():
     assert sent == [(1, data, ["192.168.1.255", "12345"])]
 
 
+def test_udp_service_buffer_read_gives_the_sender():
+    """A UDP service socket in buffer access mode (the Venus E Mini's CT002
+    socket) reads one datagram at a time, with the address it came from:
+    ``+QIRD: <len>,"<remote IP>",<remote port>`` (FC41D AT manual)."""
+    m, f, u = module()
+    f.got_ip = True
+    f.on_tx(b'AT+QIOPEN=1,"UDP SERVICE","192.168.1.50",12345,22222,0\r\n')
+    f.socket_received(1, b"first", ("192.168.1.77", 12345))
+    f.socket_received(1, b"second!", ("192.168.1.78", 12345))
+    assert b'+QIURC: "recv",1' in u.rx
+    u.rx.clear()
+    f.on_tx(b"AT+QIRD=1,0\r\n")
+    assert b"+QIRD: 12,0,12" in u.rx
+    u.rx.clear()
+    f.on_tx(b"AT+QIRD=1,1500\r\n")
+    assert bytes(u.rx) == b'\r\n+QIRD: 5,"192.168.1.77",12345\r\nfirst\r\nOK\r\n'
+    u.rx.clear()
+    f.on_tx(b"AT+QIRD=1,1500\r\n")
+    assert bytes(u.rx).startswith(b'\r\n+QIRD: 7,"192.168.1.78",12345\r\nsecond!')
+    u.rx.clear()
+    f.on_tx(b"AT+QIRD=1,0\r\n")
+    assert b"+QIRD: 12,12,0" in u.rx
+
+
 def test_ble_notify_hex_and_raw():
     m, f, u = module()
     got = []

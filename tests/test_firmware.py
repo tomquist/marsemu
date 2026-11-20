@@ -79,6 +79,44 @@ def test_venus_mini_answers_a_two_digit_command():
     assert emu.machine.reset_count == 1
 
 
+def _mini_image():
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/VNSEMINI-0/Control/309/*.bin", recursive=True))
+    if not files:
+        pytest.skip("Venus E Mini control 309 not in the archive")
+    return files[0]
+
+
+@pytest.mark.firmware
+def test_venus_mini_finds_its_phase_and_regulates_the_grid():
+    """Venus E Mini, whole device: the app's setup (self-consumption, the CT002
+    as ct_t=3, phase detection), the control's 800 W probe finds phase A, then
+    the inverter covers the house load and charges from an export."""
+    from marsemu.plant.battery import LfpPack
+    from marsemu.plant.venus3_cli import House, configure_self_consumption, connect_house
+    from marsemu.plant.venusmini import VenusMini
+    v = VenusMini(_mini_image(), pack=LfpPack(cells_n=2, capacity_ah=314, soc=0.6))
+    house = House({"A": 600.0})
+    meter = connect_house(v, house)
+    configure_self_consumption(v)
+    try:
+        probed = []
+        v.inverter.on_reference.append(lambda want, ref: v.inverter.mode in (1, 2) and probed.append(ref))
+        v.run(120, until=lambda: probed and v.inverter.mode == 0 and v.ac_power > 500 and abs(house.grid()["A"]) < 25)
+        assert probed, "no phase-detection probe (mode 1/2) seen"
+        assert meter.polls > 0 and v.inverter.meter_ok
+        assert v.inverter.mode == 0, "should regulate on the meter after its phase detection"
+        assert abs(house.grid()["A"]) < 25, f"grid {house.grid()} battery {v.ac_power:.0f} W"
+        house.loads["A"] = -300.0
+        v.run(90, until=lambda: v.ac_power < -250 and abs(house.grid()["A"]) < 25)
+        assert v.ac_power < -250 and abs(house.grid()["A"]) < 25, f"grid {house.grid()} battery {v.ac_power:.0f} W"
+        assert v.pack.current_a > 30 and v.dcdc.on
+        assert v.control.machine.reset_count == 1
+    finally:
+        v.close()
+
+
 def _venus3_images():
     if not EXTRA:
         pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
@@ -816,6 +854,30 @@ def test_ui_session_b2500_steers_and_logs_every_bus():
     assert {"USART1", "RF", "MQTT", "I2C2", "UART5"} <= {e["ch"] for e in r["events"]}
     assert snap["mcu"]["regs"]["TIM8_CCR3"] and snap["mcu"]["irqs"]
     assert len(r["history"]) > 100
+
+
+@pytest.mark.firmware
+def test_ui_session_venus_mini_steers_and_logs_its_uarts():
+    """The dashboard's session around a Venus E Mini: the setup, the phase
+    detection and the regulation run, and both internal UARTs show up."""
+    import time
+    from marsemu.ui.session import VenusMiniSession
+    s = VenusMiniSession(_mini_image(), load=500, soc=60, speed=0, poll_s=10)
+    s.start()
+    try:
+        deadline = time.time() + 600
+        while s.read()["snapshot"]["t"] < 90 and time.time() < deadline:
+            time.sleep(0.5)
+        r = s.read()
+    finally:
+        s.stop()
+    snap = r["snapshot"]
+    assert snap["error"] is None and snap["model"] == "Venus E Mini"
+    assert snap["version"] == "309" and snap["device_type"] == "VNSEMINI-0"
+    assert abs(snap["grid"]) < 60 and snap["ac"] > 400, (snap["grid"], snap["ac"])
+    assert snap["bms"]["soc"] is not None and snap["inverter"]["meter_ok"]
+    assert {"UART4", "UART5", "USART2", "RF", "MQTT"} <= {e["ch"] for e in r["events"]}
+    assert snap["can"]["by_dir"]["control→dcdc"] > 50
 
 
 UI_SESSIONS = [

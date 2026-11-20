@@ -34,7 +34,8 @@ uC/OS-III (Venus E Mini) and bare-metal loops run unmodified. Details that matte
 Behavioural models (`periph/n32g45x.py`, `periph/stm32.py`, `periph/hrtim.py`)
 implement what firmware observes: ready flags, level-triggered interrupts, UART
 byte timing with IDLE detection and DMA, DMA routed by peripheral address,
-timers with input capture, timer- and HRTIM-triggered ADC sequences, I2C state
+timers with input capture (on the N32G45x counting at their APB clock, doubled
+when the APB is divided, as on the chip), timer- and HRTIM-triggered ADC sequences, I2C state
 machines with pluggable slaves (a transfer costs its bus time), CAN/FDCAN,
 CORDIC, flash with persistence, IWDG resets, an RTC on virtual time. Register
 names come from the vendor SVD files (`data/*.json`) and show up in traces.

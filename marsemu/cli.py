@@ -546,7 +546,7 @@ def _dispatch(args) -> int:
         return cmd_info(args)
     if args.cmd == "ui":
         return cmd_ui(args)
-    if args.cmd in ("venus3", "venusd", "venusa", "jupiter", "b2500"):
+    if args.cmd in ("venus3", "venusd", "venusa", "jupiter", "venusmini", "b2500"):
         from .plant.venus3_cli import cmd_venus3
         return cmd_venus3(args)
     if args.cmd == "decode-bus":

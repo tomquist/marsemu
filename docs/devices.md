@@ -8,7 +8,7 @@ What marsemu runs for each device, and what it models around the real firmware.
 | Venus D | `venusd CONTROL BMS` | control, BMS (one per pack) | inverter, MPPT, packs |
 | Venus A | `venusa CONTROL BMS` | control, BMS (one per pack) | inverter with MPPT, packs |
 | Venus C/E | Python only (`VenusCE`) | control, BMS | power stage at the control's pins |
-| Venus E Mini | `run CONTROL` | control | — (it boots to MQTT; its inverter, DC/DC and battery are not modelled yet) |
+| Venus E Mini | `venusmini CONTROL` | control (with the battery management) | inverter, DC/DC, two-cell pack |
 | Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
 | B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |
 | B2500 v1 (HMB) | `b2500 FIRMWARE` | the one MCU | front end, PV, switched outputs |
@@ -128,28 +128,62 @@ sixth of real time.
 
 ## Venus E Mini
 
-The Venus E Mini (VNSEMINI-0, Control 309) runs as a single MCU: the control
-board ("PMU", an N32G45x running uC/OS-III) boots, joins Wi‑Fi, connects to
-MQTT, advertises over BLE as `MARS_VNSEM_…` and answers commands. It only takes
-two-digit command codes: `cd=01` gets its state report, `cd=1` is ignored.
+```mermaid
+flowchart LR
+    ctl["control MCU (PMU), N32G45x<br/>real firmware: FC41D, CT poll, phase<br/>detection, modes, battery management"]
+    inv["inverter board model (Python)<br/>Micro 270 UART protocol and its<br/>self-consumption regulator"]
+    dcdc["DC/DC board model (Python)<br/>cell voltages, current, temperatures,<br/>converter on/off"]
+    pack["LFP pack model<br/>2 cells, 314 Ah (2 kWh)"]
+    ctl -->|UART4: 0x72 mode, 0x21 meter reading| inv
+    inv -->|0x01 status, 0x02 grid and AC power| ctl
+    ctl -->|UART5: 0x90 on/off| dcdc
+    dcdc -->|0x80 cells, current, temperatures| ctl
+    dcdc --- pack
+```
+
+The Mini (VNSEMINI-0) is built differently from the other Venus models: no
+CAN bus and no BMS MCU. The control board ("PMU", an N32G45x running
+uC/OS-III) talks to an inverter board on UART4 and to a DC/DC board on UART5,
+and runs the battery management itself: SOC (an estimate from the cell
+voltages at start, then coulomb counting), capacity, protections. The battery
+is two LFP cells of 314 Ah in series (6.4 V, 2009 Wh: the firmware's rated
+capacity); the DC/DC boosts it to the inverter.
+
+* **Control** (`venus-mini` profile, Control 309): the real firmware.
+* **Inverter board** (Micro 270): a Python model. Its protocol was taken
+  from the control's request builders and reply handlers, its regulator from
+  the Micro 270 image. The control forwards the meter reading of the
+  battery's phase (`0x21`) and the inverter regulates on it: the discharge
+  power moves by half the grid power per reading, up to the feed-in limit
+  (800 W, or 1500 W with the `gps` preset). For the phase detection, the
+  backup mode, the forced charge below 5 % SOC and schedules, the control
+  commands a fixed charge or discharge power instead (`0x72`). Micro 270
+  itself boots in the emulator (`aux-g4`), at about 1/40 of real time.
+* **DC/DC board**: a Python model of what the control reads (cell voltages,
+  pack current from a coarse and a fine sensor, cell and board
+  temperatures) and of its on/off command. Its firmware is not in the
+  archives.
 
 ```bash
-marsemu run VNSEMINI-0/Control/309/*.bin --inject "30:+=cd=01"
+marsemu venusmini VNSEMINI-0/Control/309/*.bin --load 500 --soc 70
 ```
 
 ```text
-[   10.270] BLE      name MARS_VNSEM_0002
-[   16.028] MQTT-SUB marstek_energy/VNSEMINI-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl
-[   30.009] MQTT>    marstek_energy/VNSEMINI-0/device/…/ctrl gp=0,lp=0,…,pmu=309,inv=0,dcdc=0,…
+[    18.0] configuring self-consumption mode and CT 112233445566 via marstek_energy/VNSEMINI-0/App/…/ctrl
+[    40.0] ac   630.0 W  ref   630.0 W  grid  -130.0 W  soc  70.0% (bms 90.9%)  6.60 V   -99.9 A  limits [800, -800]  polls 8
+[    60.0] ac   495.5 W  ref   495.5 W  grid     4.5 W  soc  69.8% (bms 90.9%)  6.61 V   -78.6 A  limits [800, -800]  polls 17
 ```
 
-Its other boards talk to it over UARTs rather than CAN, and nothing answers
-them yet: the control polls UART4 every 200 ms and UART5 every 500 ms
-(`aa 80 81 …`, `aa 80 82 …` frames), so it reports no battery, inverter or
-DC/DC version (`soc=0`, `inv=0`, `dcdc=0`). The inverter image (Micro 270, an
-STM32G474) is recognised and boots as `aux-g4`, at about 1/40 of real time
-(its power-stage control loop runs in interrupts); the DC/DC firmware is not in
-the archives.
+The setup sends what the app does: `cd=02,md=0` (self-consumption),
+`cd=18,ct_t=3,mac=…` (a CT002; the Mini's key is `ct_t`, not `meter`) and
+`cd=58,dt=1`, the phase detection. Without a known phase the Mini does not
+regulate: it probes with 800 W (discharging above 50 % SOC, else charging),
+finds the phase whose reading moved, and from then on regulates on it. It
+answers two-digit commands only (`cd=01`, not `cd=1`). Its status line's
+`bms` SOC is the firmware's own, from its `cd=01` reports; it starts from
+the firmware's estimate of the cells' resting voltage, which in LFP's flat
+region can differ from the pack model's SOC by tens of percent (the model's
+OCV curve is a generic LFP one).
 
 The Mini's OTA images carry a 32-byte header in front of the application
 (`VNSEMINI-0_PMU_V135_186556_42_FF`: device type, board, version in hex,
@@ -236,10 +270,10 @@ started the way the bootloader would; full images run the bootloader first.
 | `venus` | Venus C/E (HMG) control | STM32G474 | LPUART1 | reaches MQTT (~40 s for V153+, ~80–95 s before); whole device V154 |
 | `venus3` | Venus E 3.0 / A / D control | N32G457 | UART6 | reaches MQTT; whole device |
 | `jupiter` | Jupiter C/E (HMM/HMN), C Plus (JPLS-8H) | N32G45x | USART1 | reaches MQTT; whole device |
-| `venus-mini` | Venus E Mini (VNSEMINI) control, 309 | N32G45x | USART2 | reaches MQTT; control only |
+| `venus-mini` | Venus E Mini (VNSEMINI) control, 309 | N32G45x | USART2 | reaches MQTT; whole device |
 | `ct00x` | CT002/CT003 (HME) | STM32F0-class | USART1 | reaches MQTT (the module claims the factory certificates) |
 | `aux` | BMS and other MCUs without an FC41D (N32) | – | – | boot; the Venus BMSes run fully with their front-end models |
-| `aux-g4` | STM32G474 inverter boards (Venus D/E 3.0/E Mini "micro") | – | – | boot; the Venus D/E 3.0 ones answer the control's CAN commands |
+| `aux-g4` | STM32G474 inverter boards (Venus D/E 3.0/E Mini "micro") | – | – | boot; the Venus D/E 3.0 ones answer the control's CAN commands; Micro 270 (Mini) runs at about 1/40 of real time |
 
 Per-image results are in [`STATUS.md`](STATUS.md), generated by
 `tools/survey.py`.
@@ -253,6 +287,8 @@ Per-image results are in [`STATUS.md`](STATUS.md), generated by
 | Battery front ends (KA495XX, SH36735, SH367309) | protocols from RE notes and disassembly, scaling measured against the firmware | high |
 | Venus inverter CAN protocols | captured from Micro v119/v116 in the emulator, RE notes | high |
 | Venus D MPPT, Venus A inverter + MPPT, Jupiter inverter/MPPT/BMS (no firmware) | the control firmware's parsers and senders | medium–high |
+| Venus E Mini inverter: protocol, regulator, modes | the control's request builders and reply handlers; the regulator from the Micro 270 image | high (protocol, regulator), medium (which status fields mean what) |
+| Venus E Mini DC/DC (no firmware) | the control's reply handler and battery management (units checked by their use) | medium–high |
 | Venus C/E power stage | the control firmware's ADC scaling and PWM mapping; component values estimated | medium |
 | B2500 ADC/PWM/DAC/GPIO mapping, settings record, SOC | disassembly, checked against the firmware's `cd=1` reports | high |
 | Power dynamics (grid-connect delay, slew, filters, losses, converter dynamics) | estimates | **calibrate against a real device** |

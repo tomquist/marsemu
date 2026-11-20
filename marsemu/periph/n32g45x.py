@@ -694,10 +694,25 @@ class Timer(Base):
                 out[n] = False
         return out
 
+    #: timers on APB2 (the rest are on APB1)
+    APB2_TIMERS = ("TIM1", "TIM8")
+
+    def core_cycles_per_tick(self) -> int:
+        """Core clocks per timer clock: a timer runs at its APB clock, doubled
+        when that APB is divided (RCC CFG PPRE1/PPRE2), e.g. 72 MHz for TIM2-7
+        with HCLK 144 MHz and APB1 = HCLK/4."""
+        rcc = self.m.bus.peripherals.get("RCC")
+        if type(rcc) is not Rcc:        # the STM32 builds reuse these timers on their own clock tree
+            return 1
+        cfg = rcc.regs.get(0x04, 0)
+        ppre = (cfg >> (11 if self.name in self.APB2_TIMERS else 8)) & 7
+        apb_div = 1 if ppre < 4 else 2 << (ppre - 4)
+        return 1 if apb_div == 1 else apb_div // 2
+
     def period(self) -> int:
         psc = self.regs.get(0x28, 0) & 0xFFFF
         arr = self.regs.get(0x2C, 0xFFFF) & 0xFFFF
-        return (psc + 1) * (arr + 1)
+        return (psc + 1) * (arr + 1) * self.core_cycles_per_tick()
 
     def _restart(self) -> None:
         if self.ev:
@@ -738,7 +753,7 @@ class Timer(Base):
     def read32(self, off):
         if off == 0x24:
             if self.regs.get(0x00, 0) & 1:
-                psc = (self.regs.get(0x28, 0) & 0xFFFF) + 1
+                psc = ((self.regs.get(0x28, 0) & 0xFFFF) + 1) * self.core_cycles_per_tick()
                 arr = (self.regs.get(0x2C, 0xFFFF) & 0xFFFF) + 1
                 return ((self.m.clock.cycles - self.t0) // psc) % arr
             return self.regs.get(0x24, 0)
