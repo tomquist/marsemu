@@ -164,6 +164,8 @@ capacity); the DC/DC boosts it to the inverter.
   temperatures) and of its on/off command. Its firmware is not in the
   archives.
 
+The whole device runs at about 1.2× real time.
+
 ```bash
 marsemu venusmini VNSEMINI-0/Control/309/*.bin --load 500 --soc 70
 ```
