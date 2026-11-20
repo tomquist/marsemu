@@ -170,3 +170,29 @@ def test_mqtt_messages_at_the_same_instant_reach_the_mcu_one_after_the_other():
     assert b"cd=2,md=0" in u.rx and b"cd=56" not in u.rx
     m.advance(0.2)
     assert b'"cd=56,dod=30"' in u.rx
+
+
+def test_mqtt_message_waits_for_a_command_reply_to_leave_the_uart():
+    """A real module holds URCs while it answers a command: glued to the reply,
+    the firmwares parse the reply and drop the +QMTRECV."""
+    m = Machine()
+    n32g45x.build(m)
+    f = Fc41d(m, Network(), Fc41dConfig(reply_ms=3))
+    log = []
+
+    class TimedUart(FakeUart):
+        def inject(self, data):
+            log.append((m.clock.seconds * 1000.0, bytes(data)))
+    f.attach(TimedUart())
+    f.got_ip = True
+    for cmd in (b'AT+QMTOPEN=0,"broker",8883\r\n', b'AT+QMTCONN=0,"client"\r\n',
+                b'AT+QMTSUB=0,1,"x/App/1/ctrl",0\r\n'):
+        f.on_tx(cmd)
+        m.advance(0.5)
+    log.clear()
+    f.on_tx(b"AT+QVERSION\r\n")                       # its reply is due in 3 ms
+    assert f.mqtt_deliver("x/App/1/ctrl", b"cd=14")   # and so would the message be
+    m.advance(0.2)
+    reply_end = max(t + len(d) * 10_000 / 115200 for t, d in log if b"QMTRECV" not in d)
+    (t_recv,) = [t for t, d in log if b"+QMTRECV" in d]
+    assert t_recv >= reply_end + f.cfg.urc_gap_ms - 0.01

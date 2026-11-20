@@ -56,7 +56,9 @@ sockets and Hame's `AT+HMIOPEN`.
 Two details only show up after minutes of running. The Hame module answers
 `AT+QGETWIFISTATE` as `ssid=…,bssid=…,rssi=…,channel=…`, not in the manual's
 positional form; and the `+QHTTPGET`/`+QHTTPPOST` result comes a network round
-trip after `OK`. Either one wrong, and a B2500 loses its CT meter. The offline
+trip after `OK`. Either one wrong, and a B2500 loses its CT meter. An incoming
+MQTT message (`+QMTRECV`) waits until a command's reply has left the UART, as
+on the module: glued to the reply, the firmwares drop it. The offline
 cloud answers what [Marsrelay](https://github.com/tomquist/marsrelay) answers.
 
 The CT00x meters do not upload certificates: theirs are loaded into the module
