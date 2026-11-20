@@ -9,8 +9,8 @@ from the firmware's side.
 Unicorn provides QEMU's Cortex-M4 core but none of the system devices, so the
 NVIC/SCB/SysTick/DWT/ITM live in `core/nvic.py` and exception entry and return
 in `core/machine.py`: basic and FPU frames, MSP/PSP, EXC_RETURN, tail-chaining,
-priorities with PRIGROUP/BASEPRI/PRIMASK, SVC, faults. FreeRTOS, CMSIS-RTOS2
-and bare-metal loops run unmodified. Details that matter:
+priorities with PRIGROUP/BASEPRI/PRIMASK, SVC, faults. FreeRTOS, CMSIS-RTOS2,
+uC/OS-III (Venus E Mini) and bare-metal loops run unmodified. Details that matter:
 
 * **Preemption is immediate.** `PENDSVSET` or unmasking BASEPRI/PRIMASK enters
   the pending handler before the next instruction, or FreeRTOS corrupts its
@@ -19,7 +19,7 @@ and bare-metal loops run unmodified. Details that matter:
 * **Virtual time is exact.** Time is executed instructions × CPI (2 by default,
   1 on the Venus E 3.0/A/D control, as on its cached flash). `core/ucount.py`
   finds Unicorn's instruction counter with a self-calibrating probe. WFI and the
-  FreeRTOS idle loop (`analysis/idle.py`) fast-forward to the next event, which
+  FreeRTOS or uC/OS-III idle loop (`analysis/idle.py`) fast-forward to the next event, which
   makes mostly idle firmware 3–6× faster. So do delay loops that only reload
   the watchdog while they wait for a tick counter in RAM (the B2500's
   `delay_ms()`): such a loop can only end after an interrupt, and a watchdog

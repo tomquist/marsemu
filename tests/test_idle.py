@@ -1,7 +1,7 @@
 """Wait loops that only reload the watchdog are found, and only those."""
 import struct
 
-from marsemu.analysis.idle import find_watchdog_waits, watchdog_reload_functions
+from marsemu.analysis.idle import find_idle_loop, find_watchdog_waits, watchdog_reload_functions
 
 BASE = 0x08000000
 
@@ -71,3 +71,34 @@ def test_counter_address_loaded_inside_the_loop():
         struct.pack("<I", 0x20000100),           # 28 literal: the counter
     ]) + b"\xff" * 0x40
     assert find_watchdog_waits(code, BASE) == [BASE + 0x18]
+
+
+def ucos_image() -> bytes:
+    """uC/OS-III: ``OS_IdleTask`` at 0x00 (loop at 0x02), another function
+    with a loop at 0x06, and ``OS_IdleTaskInit`` at 0x10 calling
+    ``OSTaskCreate(r0 = TCB, r1 = "uC/OS-III Idle Task", r2 = OS_IdleTask)``;
+    here r0 holds a code address too, which must not be taken for the entry."""
+    code = b"".join([
+        struct.pack("<H", 0x2400),               # 00 movs r4, #0          OS_IdleTask
+        struct.pack("<H", 0xBF00),               # 02 nop                  (idle loop)
+        struct.pack("<H", 0xE7FD),               # 04 b    0x02
+        struct.pack("<H", 0xBF00),               # 06 nop                  (another loop)
+        struct.pack("<H", 0xE7FD),               # 08 b    0x06
+        struct.pack("<HHH", 0xBF00, 0xBF00, 0xBF00),  # 0a nops
+        struct.pack("<H", 0x4802),               # 10 ldr  r0, [pc, #8]    (0x1c)
+        struct.pack("<H", 0x4A01),               # 12 ldr  r2, [pc, #4]    (0x18: OS_IdleTask)
+        struct.pack("<H", 0xA102),               # 14 adr  r1, #8          (0x20: the name)
+        struct.pack("<H", 0x4770),               # 16 bx   lr
+        struct.pack("<I", BASE + 0x01),          # 18 literal: OS_IdleTask | 1
+        struct.pack("<I", BASE + 0x07),          # 1c literal: the other function | 1
+        b"uC/OS-III Idle Task\x00",              # 20 the task name, after the code
+    ])
+    return code + b"\xff" * (-len(code) % 4) + b"\xff" * 0x40
+
+
+def test_ucos_idle_task_loop_is_found():
+    assert find_idle_loop(ucos_image(), BASE) == BASE + 0x02
+
+
+def test_no_idle_task_name_no_loop():
+    assert find_idle_loop(ucos_image().replace(b"uC/OS-III Idle Task", b"uC/OS-III Fast Task"), BASE) is None

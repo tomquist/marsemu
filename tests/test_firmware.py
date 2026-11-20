@@ -30,6 +30,7 @@ if EXTRA:
         ("venus3-VNSE3-151", f"{EXTRA}/**/VNSE3-0/Control/151/*.bin", 70),
         ("ct002-HME4-124", f"{EXTRA}/**/HME-4/124/*.bin", 90),
         ("jupiter-JPLS-143", f"{EXTRA}/**/JPLS-8H/143/*.bin", 70),
+        ("venus-mini-VNSEMINI-309", f"{EXTRA}/**/VNSEMINI-0/Control/309/*.bin", 40),
     ]
 
 
@@ -48,6 +49,34 @@ def test_reaches_mqtt(name, pattern, budget):
     assert emu.machine.reset_count == 1, "unexpected resets"
     topic = subs[0]
     assert "/App/" in topic and topic.endswith("/ctrl")
+
+
+@pytest.mark.firmware
+def test_venus_mini_answers_a_two_digit_command():
+    """The Venus E Mini control (an OTA image with a header, uC/OS-III) reports
+    its state on ``cd=01``; it ignores ``cd=1``, which the other devices take."""
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/VNSEMINI-0/Control/309/*.bin", recursive=True))
+    if not files:
+        pytest.skip("Venus E Mini control 309 not in the archive")
+    emu = Emulator(files[0])
+    assert emu.base == 0x08008000 and emu.idle_loop
+    subs, pubs = [], []
+    emu.on("mqtt_subscribe", subs.append)
+    emu.on("mqtt_publish", lambda t, p: pubs.append((t, bytes(p))))
+    emu.run(seconds=40, until=lambda: bool(subs))
+    assert subs == ["marstek_energy/VNSEMINI-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl"]
+    emu.run(10)
+    pubs.clear()
+    emu.mqtt_inject(subs[0], "cd=1")
+    emu.run(3)
+    assert not pubs
+    emu.mqtt_inject(subs[0], "cd=01")
+    emu.run(3)
+    state = [p for t, p in pubs if "/device/" in t]
+    assert state and b"pmu=309," in state[0]
+    assert emu.machine.reset_count == 1
 
 
 def _venus3_images():

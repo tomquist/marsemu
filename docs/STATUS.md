@@ -1,4 +1,4 @@
-Survey: 63 images, 60 virtual seconds each, three at a time; images that had not subscribed by then were re-run for 150 s (`docs/survey_retry.jsonl`).
+Survey: 64 images, 60 virtual seconds each, three at a time; images that had not subscribed by then were re-run for 150 s (`docs/survey_retry.jsonl`).
 
 | Image | Profile | Result | MQTT topic | t(sub) | Resets | Speed |
 |---|---|---|---|---|---|---|
@@ -17,6 +17,7 @@ Survey: 63 images, 60 virtual seconds each, three at a time; images that had not
 | `Control/155/202509161548003ff722863.bin` | venus | MQTT subscribed | `marstek_energy/HMG-1/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 40.6 | 0 | 3.26× |
 | `Control/156/20251118172129117290445.bin` | venus | MQTT subscribed | `marstek_energy/HMG-1/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 40.7 | 0 | 3.05× |
 | `Control/1581/ac_app_1581_0228_1_164255.bin` | venus | MQTT subscribed | `marstek_energy/HMG-1/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 40.7 | 0 | 3.06× |
+| `Control/309/309_control_VNSEMINI-0_PMU_V135_186556_42_FF_152925.bin` | venus-mini | MQTT subscribed | `marstek_energy/VNSEMINI-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 16.0 | 0 | 1.26× |
 | `HMA-1/V119/B2500V2_All_V119.bin` | b2500-v2 | MQTT subscribed | `hame_energy/HMA-1/App/bd302795c3fe60028c79102e/ctrl` | 11.8 | 0 | 0.44× |
 | `HMA-1/V157/B2500V2_All_V157.bin` | b2500-v2 | MQTT subscribed | `hame_energy/HMA-1/App/b1f87b1592f1ca585819c16b/ctrl` | 14.3 | 0 | 0.41× |
 | `HMA-1/V160/B2500V2_All_V160.1.bin` | b2500-v2 | MQTT subscribed | `hame_energy/HMA-1/App/412949745d2aad3bddbb13f1/ctrl` | 15.7 | 0 | 0.42× |

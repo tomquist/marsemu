@@ -15,7 +15,7 @@ from . import __version__
 from .emulator import Emulator
 from .fc41d.module import Fc41dConfig
 from .fc41d.net import Network
-from .profiles import PROFILES, default_device_type, detect, find_type_tables, load_base
+from .profiles import PROFILES, default_device_type, detect, find_type_tables, load_base, ota_header, strip_header
 
 #: --realtime: how far behind wall-clock time the emulator may fall before it
 #: stops trying to catch up (see throttle in cmd_run and CoSim.run)
@@ -460,14 +460,18 @@ def image_info(path: str) -> dict:
     """What ``marsemu info`` prints for one image: profile, load address,
     device types, BLE name and MQTT prefixes."""
     with open(path, "rb") as f:
-        img = f.read()
+        raw = f.read()
+    header = ota_header(raw)
+    img = strip_header(raw)
     prof = detect(img, path)
     sp, rst = struct.unpack_from("<II", img, 0)
     base = load_base(img)
     info = {
-        "file": path, "size": len(img), "profile": prof.name, "linked_at": hex(base),
+        "file": path, "size": len(raw), "profile": prof.name, "linked_at": hex(base),
         "initial_sp": hex(sp), "reset": hex(rst), "fc41d": b"AT+Q" in img,
     }
+    if header:
+        info["ota_header"] = header
     tables = find_type_tables(img, base) if prof.name.startswith("b2500") else []
     if tables:
         # B2500: the build accepts every type in its table; a unit's type is factory data
