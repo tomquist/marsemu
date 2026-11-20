@@ -172,3 +172,17 @@ def test_timers_run_at_their_apb_clock():
     assert t6.period() == 144_000 and t1.period() == 72_000
     m.bus.write(0x40021004, 0)                # undivided APBs: timers at HCLK
     assert t6.period() == 72_000
+
+
+def test_uart_baud_follows_its_apb_clock():
+    """N32G45x UARTs run on their APB clock: with HCLK 144 MHz, APB1 = HCLK/4
+    (36 MHz) and APB2 = HCLK/2 (72 MHz), the dividers the firmwares program
+    give the FC41D's 115200 baud on USART2 and UART6 alike."""
+    m, img = make(thumb(0xE7FE))
+    boot(m, img)
+    m.bus.write(0x40021004, (5 << 8) | (4 << 11))
+    u2, u6 = m.bus.get("USART2"), m.bus.get("UART6")
+    u2.regs[u2.O_BRR] = 312                    # 36 MHz / 312
+    u6.regs[u6.O_BRR] = 625                    # 72 MHz / 625
+    assert abs(u2.baud() - 115200) < 300 and u6.baud() == 115200
+    assert u2.byte_cycles() == m.clock.us_to_cycles(10_000_000 / u2.baud())

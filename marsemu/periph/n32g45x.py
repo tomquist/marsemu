@@ -312,7 +312,8 @@ class Usart(Base):
         self.dma_rx = None
         self.tx_total = 0
         self.rx_total = 0
-        self.pclk_div = 1 if name in ("USART1", "UART6", "UART7") else 2
+        #: fallback peripheral-clock divider when the RCC is not the N32 model (see pclk)
+        self.pclk_div = 1 if name in self.APB2_UARTS else 2
         super().__init__(machine, name, base)
         self.register_levels()
 
@@ -326,12 +327,23 @@ class Usart(Base):
     def addr_dat(self) -> int:
         return self.base + self.O_TDR
 
+    #: UARTs on APB2 (the rest are on APB1)
+    APB2_UARTS = ("USART1", "UART6", "UART7")
+
+    def pclk(self) -> int:
+        """The UART's APB clock, from the RCC prescalers (CFG PPRE1/PPRE2), e.g.
+        36 MHz on APB1 with HCLK 144 MHz and APB1 = HCLK/4."""
+        rcc = self.m.bus.peripherals.get("RCC")
+        if type(rcc) is not Rcc:        # the STM32 builds reuse this class on their own clock tree
+            return self.m.clock.hz // self.pclk_div
+        ppre = (rcc.regs.get(0x04, 0) >> (11 if self.name in self.APB2_UARTS else 8)) & 7
+        return self.m.clock.hz // (1 if ppre < 4 else 2 << (ppre - 4))
+
     def baud(self) -> int:
         brr = self.regs.get(self.O_BRR, 0)
         if not brr:
             return 115200
-        pclk = self.m.clock.hz // self.pclk_div
-        return max(1200, int(pclk / brr))
+        return max(1200, int(self.pclk() / brr))
 
     def byte_cycles(self) -> int:
         # 10 bits per frame at the configured baud
