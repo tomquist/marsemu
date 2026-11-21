@@ -26,7 +26,7 @@ classifiers = [
 test = ["pytest"]
 serial = ["pyserial"]
 ble = [
-    "bumble>=0.0.236",
+    "bumble>=0.0.235",
     "pyobjc-framework-CoreBluetooth>=10; sys_platform == 'darwin'",
     "pyobjc-framework-libdispatch>=10; sys_platform == 'darwin'",
 ]
