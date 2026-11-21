@@ -107,6 +107,31 @@ def test_ble_notify_hex_and_raw():
     assert got == [b"\x73\x01\x02", b"\x00\x01\x02"]
 
 
+
+def test_ble_writes_wait_until_the_connection_settles():
+    """A central's first writes reach the firmware BLE_SETTLE_S after it
+    connects, in order, as a phone's do; later ones go straight through."""
+    from marsemu.fc41d.module import BLE_SETTLE_S
+    m, f, u = module(ble_rx_mode="raw")
+    f.ble_connect()
+    assert b"+QBLESTAT:CONNECTED" in u.rx
+    u.rx.clear()
+    f.ble_write(b"\x01")
+    f.ble_write(b"\x02")
+    assert u.rx == b""
+    m.advance(BLE_SETTLE_S + 0.01)
+    assert bytes(u.rx) == b"\x01\x02"
+    f.ble_write(b"\x03")
+    assert bytes(u.rx) == b"\x01\x02\x03"
+    # a disconnect drops what is still held
+    f.ble_disconnect()
+    f.ble_connect()
+    f.ble_write(b"\x04")
+    f.ble_disconnect()
+    u.rx.clear()
+    m.advance(BLE_SETTLE_S + 0.01)
+    assert b"\x04" not in u.rx
+
 def test_cert_upload():
     m, f, u = module()
     f.on_tx(b'AT+QSSLCERT="CA",2,5\r\n')

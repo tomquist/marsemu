@@ -36,7 +36,9 @@ time (the header says how fast); after that it runs in real time.*
   to your MQTT broker with its real topics and payloads (hm2mqtt, hame-relay),
   serves the real firmware's Modbus register map to Home Assistant, steers
   against AstraMeter or any CT002 emulator as the firmware decides, and
-  answers BLE tools through a TCP socket ([interfaces](docs/interfaces.md)).
+  answers BLE tools over a TCP socket or a WebSocket, which the
+  [hmjs](https://github.com/tomquist/hmjs) demo connects to from the browser
+  ([interfaces](docs/interfaces.md)).
 * **Set up scenarios that are hard on a real device**: load steps and solar
   export while it runs, empty or full packs, cold cells, lost Wi‑Fi, button
   presses, faked sensors, firmware upgrades on the same flash and EEPROM, and

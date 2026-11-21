@@ -1439,6 +1439,14 @@ document.querySelectorAll("[data-speed]").forEach((b) => b.addEventListener("cli
 $("playBtn").addEventListener("click", () => control({ op: "pause", on: !!(SN && SN.running) }));
 $("stepBtn").addEventListener("click", () => control({ op: "step", s: 1 }));
 $("stopBtn").addEventListener("click", () => post("api/stop").catch((e) => log("EVT", "", "stop failed: " + e.message)));
+// hmjs (the Bluetooth tool in the browser) talks to the running device through
+// api/ble. A page on https may only open ws:// to localhost, so the link works
+// when this dashboard is opened on the computer running marsemu.
+{
+  const ws = new URL("api/ble", location.href);
+  ws.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  $("hmjsBtn").href = "https://tomquist.github.io/hmjs/?emulator=" + encodeURIComponent(ws.href);
+}
 // the Venus E Mini answers the two-digit command only
 const statusCmd = () => (MODEL === "Venus E Mini" ? "cd=01" : "cd=1");
 $("askBtn").addEventListener("click", () => control({ op: "mqtt", payload: statusCmd() }));

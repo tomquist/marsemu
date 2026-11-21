@@ -32,7 +32,7 @@ log = logging.getLogger("marsemu.ui")
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 MAX_IMAGE = 4 * 1024 * 1024
 _NAME_OK = re.compile(r"[^A-Za-z0-9._-]+")
-ROUTES = ("/api/state", "/api/stream", "/api/control", "/api/firmware", "/api/start", "/api/stop",
+ROUTES = ("/api/state", "/api/stream", "/api/ble", "/api/control", "/api/firmware", "/api/start", "/api/stop",
           "/app.js", "/app.css")
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".json": "application/json"}
@@ -185,6 +185,8 @@ def describe(name: str, size: int, info: dict) -> dict:
 
 
 def make_handler(app: UiApp):
+    from ..blews import BleLink
+    ble_link = BleLink(lambda: app.session.emu if app.session else None)
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
         server_version = "marsemu-ui"
@@ -235,6 +237,8 @@ def make_handler(app: UiApp):
                 return self._json(app.state())
             if route == "/api/stream":
                 return self._stream()
+            if route == "/api/ble":
+                return self._ble()
             if route.startswith("/api/"):
                 return self._error(404, "not found")
             name = {"/": "index.html", "/app.js": "app.js", "/app.css": "app.css"}.get(route)
@@ -271,6 +275,13 @@ def make_handler(app: UiApp):
             except Exception as exc:                                 # noqa: BLE001 - the device failed to build
                 log.exception("request failed")
                 return self._error(500, f"{type(exc).__name__}: {exc}")
+
+        def _ble(self) -> None:
+            # the running device's Bluetooth, for hmjs' emulator transport
+            from ..blews import accept
+            ws = accept(self)
+            if ws is not None:
+                ble_link.serve(ws)
 
         def _stream(self) -> None:
             self.send_response(200)

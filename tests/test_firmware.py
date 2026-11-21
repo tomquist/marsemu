@@ -1025,3 +1025,107 @@ def test_ui_ct003_session_reads_the_p1_meter():
     assert snap["meter"]["type"] == "HME-3" and snap["meter"]["source"] == "p1"
     assert snap["meter"]["last"][0] == "HME-3" and len(snap["meter"]["last"]) == 28
     assert [int(v) for v in snap["meter"]["last"][4:8]] == [-100, -100, 200, 0]
+
+
+def _frame(cmd: int, payload: bytes = b"") -> bytes:
+    body = bytes([0x73, 4 + len(payload) + 1, 0x23, cmd]) + payload
+    x = 0
+    for b in body:
+        x ^= b
+    return body + bytes([x])
+
+
+def _venus3_ble_session(**kw):
+    """A dashboard Venus E 3.0 session with its Bluetooth on a WebSocket, once
+    the firmware advertises; returns (session, server)."""
+    import time
+    from marsemu.blews import serve_ble_ws
+    from marsemu.ui import session as S
+    ctl, bms = _venus3_images()
+    s = S.VenusE3Session(ctl, bms=bms, speed=0, **kw)
+    s.start()
+    srv = serve_ble_ws(lambda: s.emu, 0)
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        mod = s.emu.fc41d
+        if mod.ble_adv and mod.ble_name:
+            return s, srv
+        time.sleep(0.5)
+    srv.shutdown()
+    s.stop()
+    pytest.fail("the firmware never started advertising")
+
+
+@pytest.mark.firmware
+def test_venus3_answers_over_the_ble_websocket():
+    """A WebSocket central (what hmjs' emulator transport is) reaches the
+    control firmware: the device announces its advertised name, and a device
+    info request comes back as one notification with a valid checksum."""
+    import json
+    from test_blews import Client
+    s, srv = _venus3_ble_session()
+    try:
+        c = Client(srv.server_address[1])
+        info, kind = c.recv()
+        assert kind == 1
+        info = json.loads(info)
+        assert info["name"].startswith("MST_VNSE3_") and info["advertising"]
+        # the first write, straight after connecting: the module holds it
+        # until the firmware has taken the connection up (BLE_SETTLE_S)
+        c.s.settimeout(10)
+        c.send(_frame(0x04, b"\x01"))
+        reply, kind = c.recv()
+        while kind != 2:
+            reply, kind = c.recv()
+        assert reply[0] == 0x73 and reply[2] == 0x23 and reply[3] == 0x04
+        assert b"type=VNSE3-0" in reply and b"dev_ver=151" in reply, reply
+        x = 0
+        for b in reply[:-1]:
+            x ^= b
+        assert x == reply[-1], reply.hex()
+        c.close()
+    finally:
+        srv.shutdown()
+        s.stop()
+
+
+@pytest.mark.firmware
+def test_hmjs_demo_reads_and_sets_the_emulated_venus3():
+    """The hmjs demo in a browser, as "Open in hmjs" on the dashboard opens
+    it: it finds the device, shows what the plant shows and its DoD setting
+    reaches the firmware. Needs HMJS_DEMO (a built demo: hmjs/demo/dist) and
+    Node with Playwright."""
+    import functools
+    import http.server
+    import json
+    import shutil
+    import subprocess
+    import threading
+    demo = os.environ.get("HMJS_DEMO")
+    if not demo or not os.path.isfile(os.path.join(demo, "index.html")):
+        pytest.skip("set HMJS_DEMO to a built hmjs demo (hmjs/demo/dist)")
+    node = shutil.which("node")
+    if not node or subprocess.run([node, "-e", "require('playwright')"], capture_output=True).returncode:
+        pytest.skip("needs Node with Playwright")
+    web = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0), functools.partial(http.server.SimpleHTTPRequestHandler, directory=demo))
+    threading.Thread(target=web.serve_forever, daemon=True).start()
+    s, srv = _venus3_ble_session(soc=63, load=437)
+    try:
+        script = os.path.join(os.path.dirname(__file__), "e2e", "hmjs_demo.cjs")
+        r = subprocess.run([node, script, f"http://127.0.0.1:{web.server_address[1]}/",
+                            f"ws://127.0.0.1:{srv.server_address[1]}/"],
+                           capture_output=True, text=True, timeout=300)
+        assert r.returncode == 0, r.stderr
+        ui = json.loads(r.stdout.strip().splitlines()[-1])
+        snap = s.read()["snapshot"]
+    finally:
+        srv.shutdown()
+        s.stop()
+        web.shutdown()
+    assert "Venus E 3.0" in ui["device"]
+    assert not ui["errors"], ui["errors"]
+    assert abs(float(ui["soc"].split()[0]) - snap["pack"]["soc"]) < 3, (ui, snap["pack"])
+    cells = [int(v) for v in ui["cells"].replace("mV", "").split(",")]
+    assert len(cells) == 16 and all(3000 < v < 3600 for v in cells)
+    assert ui["dod"] == "80 %"

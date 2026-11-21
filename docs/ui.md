@@ -28,6 +28,9 @@ data from the running firmware:
   Venus a house that exports), faults (Wi‑Fi down,
   CT002 offline, pack over-temperature), a status poll (`cd=1`; `cd=01` on the Venus E Mini), pause, step
   and a speed limit from 0.1× to as fast as the computer can.
+- **Open in hmjs.** Opens the [hmjs](https://github.com/tomquist/hmjs)
+  demo in a new tab, connected to the running device's Bluetooth; it reads
+  and changes the device's settings as it would a real one's.
 
 Every device marsemu models. Pick the image on the start screen; devices
 with a BMS image of their own take it too.
@@ -106,6 +109,7 @@ prefix (Home Assistant's ingress).
 | `POST api/firmware?name=FILE` | Save the request body as a firmware image |
 | `POST api/start` | `{"image": "FILE", "pv": [W, W], "load": W, "soc": %}`; devices with a BMS image take `"bms": "FILE"`, the Venus D and A `"packs": N`, the CT `"batteries": N` |
 | `POST api/stop` | Stop the device |
+| `GET api/ble` | WebSocket: the running device's Bluetooth, one message per write and notification ([interfaces](interfaces.md#over-websocket)) |
 
 From Python, the classes in `marsemu.ui.session` (`B2500Session`,
 `VenusE3Session`, `VenusDSession`, `VenusASession`, `VenusMiniSession`, `JupiterSession`,

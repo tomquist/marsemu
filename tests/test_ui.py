@@ -123,3 +123,29 @@ def test_images_are_classified():
     ct = describe("124_HME-4.bin", 1, {"profile": "ct00x", "device_types": ["HME-4"]})
     assert ct["supported"] and ct["model"] == "CT002 / CT003"
     assert describe("115_bms.bin", 1, {"profile": "aux"})["role"] == "bms"
+
+
+
+def test_ble_websocket_needs_a_running_device(server):
+    """api/ble is the running device's Bluetooth over WebSocket; with no
+    device it says so and closes."""
+    from test_blews import Client
+    _, url = server
+    c = Client(int(url.rsplit(":", 1)[1]), "/api/ble")
+    msg, kind = c.recv()
+    assert kind == 1 and json.loads(msg) == {"type": "error", "message": "no device is running"}
+    assert c.recv()[1] == 8
+    c.s.close()
+
+
+def test_ble_websocket_reaches_the_running_device(server):
+    from test_blews import Client, FakeModule
+    app, url = server
+    module = FakeModule()
+    app.session = type("Session", (), {"emu": type("Emu", (), {"fc41d": module})()})()
+    c = Client(int(url.rsplit(":", 1)[1]), "/prefix/api/ble")      # behind ingress too
+    assert json.loads(c.recv()[0])["name"] == "MST_VNSE3_0002"
+    c.send(b"\x73\x01")
+    assert c.recv()[0] == b"\x01\x73"
+    c.close()
+    app.session = None

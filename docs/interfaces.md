@@ -47,6 +47,37 @@ which is what the plant shows at that moment (`/status`: PV 299.9 W per input,
 outputs 104.2 W each, grid 1 W). `run` takes `--ble-port` too, but without a
 power-stage model the ADCs read mid-scale and the numbers mean nothing.
 
+### Over WebSocket
+
+`--ble-ws [HOST:]PORT` (on `run` and every whole-device command) serves the
+same link over WebSocket: each binary message the client sends is one write
+to FF01, and each notification on FF02 comes back as one binary message. A
+TCP stream cannot keep notifications apart when a reply's length byte is
+wrong, as some B2500 replies' are; WebSocket messages can. Text messages
+carry JSON about the device, when the client connects and whenever it
+changes:
+
+```json
+{"type": "device", "name": "MST_VNSE3_0002", "advertising": true, "mac": "c8:47:8c:00:00:02", "services": ["ff00"]}
+```
+
+One client is connected at a time, as on the device: a new one replaces the
+previous one. This is what hmjs' emulator transport speaks, so its demo
+works with the emulated device as with a real one, with no Bluetooth
+adapter:
+
+```bash
+marsemu venus3 VNSE3-0/Control/151/*.bin VNSE3-0/BMS/115/*.bin --realtime --ble-ws 7101
+# then open https://tomquist.github.io/hmjs/?emulator=ws://127.0.0.1:7101/
+```
+
+Browsers let an HTTPS page open `ws://localhost`, so the hosted demo
+reaches a local emulator. The dashboard serves the running device's
+Bluetooth the same way at `api/ble`, and its **Open in hmjs** button opens
+the demo connected to it. Writes in the first 0.3 s (emulated) after a
+central connects are held until then, as a phone takes that long before it
+writes; the firmware drops a write that arrives with the connection event.
+
 ## Interactive and GDB
 
 `-i` reads commands from stdin while the device runs:
