@@ -26,7 +26,7 @@ import logging
 import struct
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Callable, Optional
+from typing import Optional
 
 log = logging.getLogger("emu.blews")
 

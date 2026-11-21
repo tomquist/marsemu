@@ -74,9 +74,42 @@ marsemu venus3 VNSE3-0/Control/151/*.bin VNSE3-0/BMS/115/*.bin --realtime --ble-
 Browsers let an HTTPS page open `ws://localhost`, so the hosted demo
 reaches a local emulator. The dashboard serves the running device's
 Bluetooth the same way at `api/ble`, and its **Open in hmjs** button opens
-the demo connected to it. Writes in the first 0.3 s (emulated) after a
-central connects are held until then, as a phone takes that long before it
-writes; the firmware drops a write that arrives with the connection event.
+the demo connected to it. Writes in the first second (emulated) after a
+central connects are held until then, as a phone takes about that long
+(service discovery, notifications) before it writes; the firmware drops a
+write that arrives too soon after the connection event. While it brings up
+Wi‑Fi and MQTT after booting it also drops some writes, as the device does;
+hmjs sends every command twice for that reason.
+
+### As a Bluetooth device
+
+`--ble-peripheral TRANSPORT` makes the emulated device a real Bluetooth LE
+peripheral, which the Marstek app, a browser's device picker or any other
+BLE tool finds and connects to as to the device. It needs Bumble, Google's
+Bluetooth stack in Python: `pip install 'marsemu[ble]'`. It serves what the
+firmware sets up: its name, service `FF00` with `FF01`, `FF02` and `FF06`,
+advertising once the firmware starts it, an MTU of up to 247. The transport
+decides who sees it:
+
+| `TRANSPORT` | Who sees the device |
+|---|---|
+| `vhci` | This Linux host: a virtual adapter appears (`hciN`, `sudo modprobe hci_vhci` and write access to `/dev/vhci`), and BlueZ, so Chrome and `bluetoothctl`, sees the device through it. No radio |
+| `usb:0` | Everything in radio range, through a USB Bluetooth dongle that the host's own stack does not use (on Linux, `sudo hciconfig hciN down` first) |
+| `android-netsim` | The Android emulator: its Chrome and apps, the Marstek app among them |
+
+Any other [Bumble transport](https://google.github.io/bumble/transports/)
+works too (`serial:…` for an HCI UART controller, `tcp-client:…`).
+
+```bash
+sudo modprobe hci_vhci
+marsemu venus3 VNSE3-0/Control/151/*.bin VNSE3-0/BMS/115/*.bin --realtime --ble-peripheral vhci
+bluetoothctl scan le      # [NEW] Device C8:47:8C:00:00:02 MST_VNSE3_0002
+```
+
+Chrome uses the system's default adapter, so with a real adapter present,
+power it off (`bluetoothctl power off` after `select` on it) or use a
+machine without one. The device advertises with its own MAC as a static
+random address.
 
 ## Interactive and GDB
 

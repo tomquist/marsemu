@@ -19,7 +19,7 @@ and better hardware models are all welcome.
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -e '.[test]'
+pip install -e '.[test,ble]'
 python -m pytest                     # unit tests, no firmware needed (CI runs these)
 ```
 

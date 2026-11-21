@@ -37,7 +37,8 @@ time (the header says how fast); after that it runs in real time.*
   serves the real firmware's Modbus register map to Home Assistant, steers
   against AstraMeter or any CT002 emulator as the firmware decides, and
   answers BLE tools over a TCP socket or a WebSocket, which the
-  [hmjs](https://github.com/tomquist/hmjs) demo connects to from the browser
+  [hmjs](https://github.com/tomquist/hmjs) demo connects to from the browser,
+  or as a Bluetooth device that phones and browsers find
   ([interfaces](docs/interfaces.md)).
 * **Set up scenarios that are hard on a real device**: load steps and solar
   export while it runs, empty or full packs, cold cells, lost Wi‑Fi, button

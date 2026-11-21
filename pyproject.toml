@@ -25,6 +25,7 @@ classifiers = [
 [project.optional-dependencies]
 test = ["pytest"]
 serial = ["pyserial"]
+ble = ["bumble>=0.0.236"]
 
 [project.urls]
 Homepage = "https://github.com/tomquist/marsemu"

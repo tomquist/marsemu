@@ -32,10 +32,14 @@ const [demoUrl, wsUrl] = process.argv.slice(2);
     .locator(".form-group", { has: page.locator("#family-dod") })
     .getByRole("button", { name: "Set" })
     .click();
-  await page.waitForTimeout(2000);
-  await page.getByRole("button", { name: "Read status" }).click();
-  await page.waitForTimeout(1500);
-  out.dod = await value("Depth of discharge");
+  // the firmware answers when its own Wi-Fi/MQTT work lets it: read until
+  // the new value shows, as a user would press the button again
+  for (let i = 0; i < 12 && out.dod !== "80 %"; i++) {
+    await page.waitForTimeout(1500);
+    await page.getByRole("button", { name: "Read status" }).click();
+    await page.waitForTimeout(1000);
+    out.dod = await value("Depth of discharge");
+  }
   out.errors = errors;
   console.log(JSON.stringify(out));
   await browser.close();

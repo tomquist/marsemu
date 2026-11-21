@@ -1035,9 +1035,10 @@ def _frame(cmd: int, payload: bytes = b"") -> bytes:
     return body + bytes([x])
 
 
-def _venus3_ble_session(**kw):
+def _venus3_ble_session(online=False, **kw):
     """A dashboard Venus E 3.0 session with its Bluetooth on a WebSocket, once
-    the firmware advertises; returns (session, server)."""
+    the firmware advertises (with ``online``: once its MQTT session is up,
+    the device fully booted); returns (session, server)."""
     import time
     from marsemu.blews import serve_ble_ws
     from marsemu.ui import session as S
@@ -1048,7 +1049,8 @@ def _venus3_ble_session(**kw):
     deadline = time.time() + 600
     while time.time() < deadline:
         mod = s.emu.fc41d
-        if mod.ble_adv and mod.ble_name:
+        if mod.ble_adv and mod.ble_name and (
+                not online or any(m.connected for m in mod.mqtt.values())):
             return s, srv
         time.sleep(0.5)
     srv.shutdown()
@@ -1063,7 +1065,7 @@ def test_venus3_answers_over_the_ble_websocket():
     info request comes back as one notification with a valid checksum."""
     import json
     from test_blews import Client
-    s, srv = _venus3_ble_session()
+    s, srv = _venus3_ble_session(online=True)
     try:
         c = Client(srv.server_address[1])
         info, kind = c.recv()
@@ -1110,7 +1112,9 @@ def test_hmjs_demo_reads_and_sets_the_emulated_venus3():
     web = http.server.ThreadingHTTPServer(
         ("127.0.0.1", 0), functools.partial(http.server.SimpleHTTPRequestHandler, directory=demo))
     threading.Thread(target=web.serve_forever, daemon=True).start()
-    s, srv = _venus3_ble_session(soc=63, load=437)
+    # as a user would, once the device has booted: while it brings up Wi-Fi
+    # and MQTT, the firmware drops some of what arrives over Bluetooth
+    s, srv = _venus3_ble_session(online=True, soc=63, load=437)
     try:
         script = os.path.join(os.path.dirname(__file__), "e2e", "hmjs_demo.cjs")
         r = subprocess.run([node, script, f"http://127.0.0.1:{web.server_address[1]}/",
@@ -1129,3 +1133,58 @@ def test_hmjs_demo_reads_and_sets_the_emulated_venus3():
     cells = [int(v) for v in ui["cells"].replace("mV", "").split(",")]
     assert len(cells) == 16 and all(3000 < v < 3600 for v in cells)
     assert ui["dod"] == "80 %"
+
+
+@pytest.mark.firmware
+def test_venus3_as_a_ble_peripheral():
+    """The emulated Venus E 3.0 as a Bluetooth LE peripheral (Bumble, on an
+    in-memory link): a central scans, finds the name the firmware set,
+    connects, finds its service and gets its device info as a notification."""
+    pytest.importorskip("bumble")
+    import asyncio
+    from bumble.controller import Controller
+    from bumble.core import UUID
+    from bumble.device import Device, Peer
+    from bumble.hci import Address
+    from bumble.host import Host
+    from bumble.link import LocalLink
+    from bumble.transport.common import AsyncPipeSink
+    from marsemu.bleperiph import BlePeripheral
+    from test_bleperiph import scan
+    ctl, bms = _venus3_images()
+    from marsemu.ui import session as S
+    import time
+    s = S.VenusE3Session(ctl, bms=bms, speed=0)
+    s.start()
+    deadline = time.time() + 600
+    while not any(m.connected for m in s.emu.fc41d.mqtt.values()) and time.time() < deadline:
+        time.sleep(0.5)                     # booted, as in the browser test
+    link = LocalLink()
+    p = BlePeripheral(s.emu, None, link=link).start()
+
+    async def phone():
+        c = Controller("phone", link=link)
+        central = Device(name="phone", address=Address("F0:F0:F0:F0:F0:F0"), host=Host(c, AsyncPipeSink(c)))
+        await central.power_on()
+        address, name = await scan(central, 600)
+        conn = await central.connect(address)
+        peer = Peer(conn)
+        await peer.request_mtu(247)
+        await peer.discover_services()
+        await peer.discover_characteristics()
+        (ff01,) = peer.get_characteristics_by_uuid(UUID("FF01"))
+        (ff02,) = peer.get_characteristics_by_uuid(UUID("FF02"))
+        got = asyncio.Queue()
+        await peer.subscribe(ff02, lambda v: got.put_nowait(bytes(v)))
+        await ff01.write_value(_frame(0x04, b"\x01"))
+        reply = await asyncio.wait_for(got.get(), 30)
+        await conn.disconnect()
+        return name, reply
+
+    try:
+        name, reply = asyncio.run_coroutine_threadsafe(phone(), p.loop).result(900)
+    finally:
+        p.close()
+        s.stop()
+    assert name.startswith("MST_VNSE3_")
+    assert reply[3] == 0x04 and b"type=VNSE3-0" in reply and b"dev_ver=151" in reply, reply

@@ -77,9 +77,9 @@ def unq(s: str) -> str:
 OLD_CERT_FORMAT_BUILDS = ("202406141323", "202409090159")
 #: virtual seconds between a central connecting and its first write reaching
 #: the firmware: a phone discovers the services and enables notifications
-#: first. Firmware that gets a write in the same breath as the connection
-#: event drops it (the Venus E 3.0 does).
-BLE_SETTLE_S = 0.3
+#: first, which takes about this long. Firmware drops a write that comes too
+#: soon after the connection event: the Venus E 3.0 one within 0.45 s.
+BLE_SETTLE_S = 1.0
 
 
 @dataclass
@@ -746,6 +746,7 @@ class Fc41d(UartDevice):
     def at_QBLEADVSTOP(self, mode, args):
         self.ble_adv = False
         self.ok()
+        self.emit("ble_adv", False)
 
     def at_QBLETRANMODE(self, mode, args):
         self.ble_tran_uuid = unq(args[0]) if args else None
