@@ -1188,3 +1188,38 @@ def test_venus3_as_a_ble_peripheral():
         s.stop()
     assert name.startswith("MST_VNSE3_")
     assert reply[3] == 0x04 and b"type=VNSE3-0" in reply and b"dev_ver=151" in reply, reply
+
+
+@pytest.mark.firmware
+def test_venus3_through_the_corebluetooth_peripheral():
+    """The CoreBluetooth peripheral with the Venus E 3.0 firmware, macOS
+    played by the stand-in of test_bleperiph_macos: the firmware's GATT
+    setup and name reach "macOS", and a central's device info request comes
+    back as a notification."""
+    import time
+    from types import SimpleNamespace
+    from marsemu.bleperiph_macos import CoreBluetoothPeripheral
+    from marsemu.ui import session as S
+    from test_bleperiph_macos import MANAGERS, Central, fake_cb, until
+    ctl, bms = _venus3_images()
+    s = S.VenusE3Session(ctl, bms=bms, speed=0)
+    s.start()
+    deadline = time.time() + 600
+    while not any(m.connected for m in s.emu.fc41d.mqtt.values()) and time.time() < deadline:
+        time.sleep(0.5)
+    MANAGERS.clear()
+    p = CoreBluetoothPeripheral(SimpleNamespace(fc41d=s.emu.fc41d), cb=fake_cb()).start()
+    mgr = MANAGERS[0]
+    try:
+        assert until(lambda: mgr.advertising, 10)
+        assert mgr.adverts[-1]["kCBAdvDataLocalName"].startswith("MST_VNSE3_")
+        phone = Central("F00D")
+        mgr.subscribe(phone, "FF02")
+        mgr.write(phone, "FF01", _frame(0x04, b"\x01"))
+        assert until(lambda: mgr.sent, 30), "no notification"
+        uuid, reply = mgr.sent[0]
+    finally:
+        p.close()
+        s.stop()
+    assert uuid == "FF02"
+    assert reply[3] == 0x04 and b"type=VNSE3-0" in reply, reply

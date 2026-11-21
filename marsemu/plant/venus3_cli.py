@@ -404,7 +404,7 @@ def _add(sub, cmd: str, model: str) -> None:
                    help="don't configure self-consumption mode and the CT over MQTT after first connect")
     v.add_argument("--http-port", type=int, default=8090, help="serve /power (grid) and /status; 0 = off")
     v.add_argument("--ble-port", type=int, help="TCP port bridging a BLE central to the control MCU (raw bytes in/out)")
-    v.add_argument("--ble-peripheral", metavar="TRANSPORT", help="be a Bluetooth LE peripheral that phones and browsers find: vhci (a virtual adapter for this Linux host), or a Bumble transport such as usb:0 or android-netsim (needs marsemu[ble])")
+    v.add_argument("--ble-peripheral", metavar="TRANSPORT", help="be a Bluetooth LE peripheral that phones and browsers find: vhci (a virtual adapter for this Linux host), corebluetooth (this Mac's Bluetooth), or a Bumble transport such as usb:0 or android-netsim (needs marsemu[ble])")
     v.add_argument("--ble-ws", metavar="[HOST:]PORT", help="serve Bluetooth over WebSocket on [HOST:]PORT (one message per write/notification; hmjs' emulator transport connects to it)")
     v.add_argument("--serve-uart", action="append", default=[], metavar="NAME:PORT",
                    help="serve a UART of the control MCU on a TCP port"

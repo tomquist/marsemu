@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="real: TCP/UDP client sockets connect, listeners bind on the host")
     r.add_argument("--listen-offset", type=int, default=0, help="host port = device port + offset")
     r.add_argument("--ble-port", type=int, help="TCP port bridging a BLE central (raw bytes in/out)")
-    r.add_argument("--ble-peripheral", metavar="TRANSPORT", help="be a Bluetooth LE peripheral that phones and browsers find: vhci (a virtual adapter for this Linux host), or a Bumble transport such as usb:0 or android-netsim (needs marsemu[ble])")
+    r.add_argument("--ble-peripheral", metavar="TRANSPORT", help="be a Bluetooth LE peripheral that phones and browsers find: vhci (a virtual adapter for this Linux host), corebluetooth (this Mac's Bluetooth), or a Bumble transport such as usb:0 or android-netsim (needs marsemu[ble])")
     r.add_argument("--ble-ws", metavar="[HOST:]PORT", help="serve Bluetooth over WebSocket on [HOST:]PORT (one message per write/notification; hmjs' emulator transport connects to it)")
     r.add_argument("--serve-uart", action="append", default=[], metavar="NAME:PORT",
                    help="serve a UART on a TCP port, raw bytes both ways (e.g. UART5:7005 = B2500 extension bus)")

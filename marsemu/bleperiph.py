@@ -13,6 +13,8 @@ built on Bumble, Google's Bluetooth stack in Python (``pip install
     gets a new adapter, ``hciN``, through which it sees the emulated device
     advertising; no radio is involved. ``vhci:/path`` names another device
     node.
+``corebluetooth``
+    The Mac's own Bluetooth, through macOS: see :mod:`marsemu.bleperiph_macos`.
 ``usb:N`` / ``serial:…`` / ``tcp-client:…`` / ``android-netsim`` / …
     Any other Bumble transport (https://google.github.io/bumble/transports/):
     a USB Bluetooth dongle the host's stack does not use (on air, for a phone
@@ -254,11 +256,16 @@ class BlePeripheral:
         self.loop.create_task(self._sync())
 
 
-def start_ble_peripheral(emulator, transport: str) -> BlePeripheral:
+def start_ble_peripheral(emulator, transport: str):
     """``--ble-peripheral TRANSPORT``: serve the emulator's Bluetooth on a
-    Bumble controller; returns the running peripheral."""
+    Bumble controller, or with ``corebluetooth`` on the Mac's own Bluetooth
+    (:mod:`marsemu.bleperiph_macos`); returns the running peripheral."""
     try:
-        p = BlePeripheral(emulator, transport).start()
+        if transport == "corebluetooth":
+            from .bleperiph_macos import CoreBluetoothPeripheral
+            p = CoreBluetoothPeripheral(emulator).start()
+        else:
+            p = BlePeripheral(emulator, transport).start()
     except RuntimeError as exc:
         hint = (" (a virtual adapter needs the hci_vhci kernel module, `sudo modprobe hci_vhci`, and write"
                 " access to /dev/vhci)") if transport.split(":", 1)[0] == "vhci" else ""

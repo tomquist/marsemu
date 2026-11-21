@@ -94,6 +94,7 @@ decides who sees it:
 | `TRANSPORT` | Who sees the device |
 |---|---|
 | `vhci` | This Linux host: a virtual adapter appears (`hciN`, `sudo modprobe hci_vhci` and write access to `/dev/vhci`), and BlueZ, so Chrome and `bluetoothctl`, sees the device through it. No radio |
+| `corebluetooth` | Everything in radio range, through the Mac's own Bluetooth (below) |
 | `usb:0` | Everything in radio range, through a USB Bluetooth dongle that the host's own stack does not use (on Linux, `sudo hciconfig hciN down` first) |
 | `android-netsim` | The Android emulator: its Chrome and apps, the Marstek app among them |
 
@@ -110,6 +111,28 @@ Chrome uses the system's default adapter, so with a real adapter present,
 power it off (`bluetoothctl power off` after `select` on it) or use a
 machine without one. The device advertises with its own MAC as a static
 random address.
+
+#### On a Mac
+
+`--ble-peripheral corebluetooth` uses the Mac's built-in Bluetooth through
+macOS' CoreBluetooth (pyobjc, which `marsemu[ble]` installs on a Mac). A
+phone nearby, with the Marstek app or Chrome, finds the emulated device by
+its name. Run marsemu natively (Docker on a Mac has no Bluetooth), and allow
+the terminal to use Bluetooth when macOS asks (System Settings → Privacy &
+Security → Bluetooth). macOS keeps some things to itself:
+
+- The advertisement holds the device's name only; macOS chooses the address
+  (not the device's MAC) and the interval. After connecting, a central
+  reading the GAP device name gets the Mac's name.
+- A central counts as connected from its first subscription or write, and
+  as gone when it has no subscription left (CoreBluetooth reports no
+  connections to a peripheral). The firmware cannot drop a central
+  (`AT+QBLEDISCONN` is logged).
+- A notification longer than the central's MTU allows is cut by macOS; the
+  Venus' longest reply needs an MTU of 147, which phones and Chrome ask for.
+- The Mac cannot connect to itself; Chrome on the same Mac does not see it.
+  A USB dongle (`usb:0`) works for that: the Mac's own Bluetooth then sees
+  the dongle's device.
 
 ## Interactive and GDB
 
