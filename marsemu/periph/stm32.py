@@ -10,6 +10,8 @@ models are shared with :mod:`marsemu.periph.n32g45x`.
 """
 from __future__ import annotations
 
+import math
+
 import ctypes
 import json
 import logging
@@ -393,6 +395,7 @@ class AdcV2(Base):
         self.ev = None
         super().__init__(machine, name, base, irqs={})
         self.size = 0x100 if not f0 else 0x400
+        self._extsel = self.HRTIM_EXTSEL.get(name, {})
 
     def sample(self, ch):
         if self.provider:
@@ -459,10 +462,11 @@ class AdcV2(Base):
 
     def hrtim_trigger(self, trg: int) -> None:
         """HRTIM ADC trigger ``trg`` fired: convert if armed for it."""
-        if not self.regs.get(0x08, 0) & 4:
+        regs = self.regs
+        if not regs.get(0x08, 0) & 4:
             return
-        cfgr = self._cfgr()
-        if not (cfgr >> 10) & 3 or self.HRTIM_EXTSEL.get(self.name, {}).get((cfgr >> 5) & 0x1F) != trg:
+        cfgr = regs.get(0x0C, 0)
+        if not (cfgr >> 10) & 3 or self._extsel.get((cfgr >> 5) & 0x1F) != trg:
             return
         self._convert()
 
@@ -471,7 +475,11 @@ class AdcV2(Base):
 
     def _convert(self):
         dma = self._cfgr() & 1
-        vals = [self.sample(ch) for ch in self.sequence()]
+        if self.provider:
+            vals = [self.sample(ch) for ch in self.sequence()]
+        else:   # the common case, at tens of kHz under a power stage
+            get, default = self.values.get, self.default
+            vals = [get(ch, default) for ch in self.sequence()]
         if vals:
             self.regs[0x40] = vals[-1]
             if dma and self.dma is not None:
@@ -572,7 +580,12 @@ class Cordic(Base):
     @staticmethod
     def _to_q(x, bits):
         full = 1 << (bits - 1)
-        return max(-full, min(full - 1, int(round(x * full)))) & ((1 << bits) - 1)
+        v = round(x * full)
+        if v >= full:
+            v = full - 1
+        elif v < -full:
+            v = -full
+        return v & ((full << 1) - 1)
 
     def read32(self, off):
         if off == 0x00:
@@ -601,8 +614,7 @@ class Cordic(Base):
             self._compute()
 
     def _compute(self):
-        import math
-        csr = self._csr()
+        csr = self.regs.get(0x00, 0)
         func, scale = csr & 0xF, (csr >> 8) & 7
         a, b = self.args
         r1 = r2 = 0.0
@@ -908,7 +920,11 @@ def build_g4(machine, uid: bytes, flash_kb: int = 512) -> None:
     machine.bus.get("FLASH").bank_size = flash_kb * 1024 // 2
     machine.hrtim = Hrtim(machine)
     adcs = [machine.bus.get(n) for n in ("ADC1", "ADC2", "ADC3", "ADC4", "ADC5")]
-    machine.hrtim.adc_listeners.append(lambda trg: [a.hrtim_trigger(trg) for a in adcs])
+
+    def trigger_adcs(trg):
+        for a in adcs:
+            a.hrtim_trigger(trg)
+    machine.hrtim.adc_listeners.append(trigger_adcs)
     machine.bus.map_window(0x40000000, 0x30000)
     machine.bus.map_window(0x48000000, 0x2000)
     machine.bus.map_window(0x50000000, 0x2000)

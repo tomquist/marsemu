@@ -47,6 +47,93 @@ which is what the plant shows at that moment (`/status`: PV 299.9 W per input,
 outputs 104.2 W each, grid 1 W). `run` takes `--ble-port` too, but without a
 power-stage model the ADCs read mid-scale and the numbers mean nothing.
 
+### Over WebSocket
+
+`--ble-ws [HOST:]PORT` (on `run` and every whole-device command) serves the
+same link over WebSocket: each binary message the client sends is one write
+to FF01, and each notification on FF02 comes back as one binary message. A
+TCP stream cannot keep notifications apart when a reply's length byte is
+wrong, as some B2500 replies' are; WebSocket messages can. Text messages
+carry JSON about the device, when the client connects and whenever it
+changes:
+
+```json
+{"type": "device", "name": "MST_VNSE3_0002", "advertising": true, "mac": "c8:47:8c:00:00:02", "services": ["ff00"]}
+```
+
+One client is connected at a time, as on the device: a new one replaces the
+previous one. This is what hmjs' emulator transport speaks, so its demo
+works with the emulated device as with a real one, with no Bluetooth
+adapter:
+
+```bash
+marsemu venus3 VNSE3-0/Control/151/*.bin VNSE3-0/BMS/115/*.bin --realtime --ble-ws 7101
+# then open https://tomquist.github.io/hmjs/?emulator=ws://127.0.0.1:7101/
+```
+
+Browsers let an HTTPS page open `ws://localhost`, so the hosted demo
+reaches a local emulator. The dashboard serves the running device's
+Bluetooth the same way at `api/ble`, and its **Open in hmjs** button opens
+the demo connected to it. Writes in the first second (emulated) after a
+central connects are held until then, as a phone takes about that long
+(service discovery, notifications) before it writes; the firmware drops a
+write that arrives too soon after the connection event. While it brings up
+Wi‑Fi and MQTT after booting it also drops some writes, as the device does;
+hmjs sends every command twice for that reason.
+
+### As a Bluetooth device
+
+`--ble-peripheral TRANSPORT` makes the emulated device a real Bluetooth LE
+peripheral, which the Marstek app, a browser's device picker or any other
+BLE tool finds and connects to as to the device. It needs Bumble, Google's
+Bluetooth stack in Python: `pip install 'marsemu[ble]'`. It serves what the
+firmware sets up: its name, service `FF00` with `FF01`, `FF02` and `FF06`,
+advertising once the firmware starts it, an MTU of up to 247. The transport
+decides who sees it:
+
+| `TRANSPORT` | Who sees the device |
+|---|---|
+| `vhci` | This Linux host: a virtual adapter appears (`hciN`, `sudo modprobe hci_vhci` and write access to `/dev/vhci`), and BlueZ, so Chrome and `bluetoothctl`, sees the device through it. No radio |
+| `corebluetooth` | Everything in radio range, through the Mac's own Bluetooth (below) |
+| `usb:0` | Everything in radio range, through a USB Bluetooth dongle that the host's own stack does not use (on Linux, `sudo hciconfig hciN down` first) |
+| `android-netsim` | The Android emulator: its Chrome and apps, the Marstek app among them |
+
+Any other [Bumble transport](https://google.github.io/bumble/transports/)
+works too (`serial:…` for an HCI UART controller, `tcp-client:…`).
+
+```bash
+sudo modprobe hci_vhci
+marsemu venus3 VNSE3-0/Control/151/*.bin VNSE3-0/BMS/115/*.bin --realtime --ble-peripheral vhci
+bluetoothctl scan le      # [NEW] Device C8:47:8C:00:00:02 MST_VNSE3_0002
+```
+
+Chrome uses the system's default adapter, so with a real adapter present,
+power it off (`bluetoothctl power off` after `select` on it) or use a
+machine without one. The device advertises with its own MAC as a static
+random address.
+
+#### On a Mac
+
+`--ble-peripheral corebluetooth` uses the Mac's built-in Bluetooth through
+macOS' CoreBluetooth (pyobjc, which `marsemu[ble]` installs on a Mac). A
+phone nearby, with the Marstek app or Chrome, finds the emulated device by
+its name. Run marsemu natively (Docker on a Mac has no Bluetooth), and allow
+the terminal to use Bluetooth when macOS asks (System Settings → Privacy &
+Security → Bluetooth). macOS keeps some things to itself:
+
+- The advertisement holds the device's name only; macOS chooses the address
+  (not the device's MAC) and the interval. After connecting, a central
+  reading the GAP device name gets the Mac's name.
+- A central counts as connected from its first subscription or write, and
+  as gone when it has no subscription left (CoreBluetooth reports no
+  connections to a peripheral). The firmware cannot drop a central
+  (`AT+QBLEDISCONN` is logged).
+- A notification longer than the central's MTU allows is cut by macOS; the
+  Venus' longest reply needs an MTU of 147, which phones and Chrome ask for.
+- The Mac cannot connect to itself; Chrome on the same Mac does not see it.
+  A USB dongle (`usb:0`) works for that: the Mac's own Bluetooth then sees
+  the dongle's device.
+
 ## Interactive and GDB
 
 `-i` reads commands from stdin while the device runs:

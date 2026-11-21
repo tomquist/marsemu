@@ -75,6 +75,11 @@ def unq(s: str) -> str:
 
 #: module builds that answer AT+QSSLCERT? without a checksum
 OLD_CERT_FORMAT_BUILDS = ("202406141323", "202409090159")
+#: virtual seconds between a central connecting and its first write reaching
+#: the firmware: a phone discovers the services and enables notifications
+#: first, which takes about this long. Firmware drops a write that comes too
+#: soon after the connection event: the Venus E 3.0 one within 0.45 s.
+BLE_SETTLE_S = 1.0
 
 
 @dataclass
@@ -206,6 +211,8 @@ class Fc41d(UartDevice):
         self.ble_name = "Quec_BLE"
         self.ble_adv = False
         self.ble_connected = False
+        self.ble_connect_t = 0.0
+        self._ble_held: List[Tuple[bytes, str]] = []
         self.ble_services: List[str] = []
         self.ble_chars: List[str] = []
         self.ble_tran_uuid: Optional[str] = None
@@ -739,6 +746,7 @@ class Fc41d(UartDevice):
     def at_QBLEADVSTOP(self, mode, args):
         self.ble_adv = False
         self.ok()
+        self.emit("ble_adv", False)
 
     def at_QBLETRANMODE(self, mode, args):
         self.ble_tran_uuid = unq(args[0]) if args else None
@@ -779,11 +787,13 @@ class Fc41d(UartDevice):
     # driven by the outside world
     def ble_connect(self) -> None:
         self.ble_connected = True
+        self.ble_connect_t = self.m.clock.seconds
         self.urc("+QBLESTAT:CONNECTED")
         self.emit("ble_state", "connected")
 
     def ble_disconnect(self) -> None:
         self.ble_connected = False
+        self._ble_held = []
         self.urc("+QBLESTAT:DISCONNECTED")
         self.emit("ble_state", "disconnected")
 
@@ -791,6 +801,22 @@ class Fc41d(UartDevice):
         """The phone writes ``data`` to the GATT characteristic."""
         if not self.ble_connected:
             self.ble_connect()
+        wait = self.ble_connect_t + BLE_SETTLE_S - self.m.clock.seconds
+        if wait > 0 or self._ble_held:
+            # too soon after connecting: hold it, and what follows, in order
+            if not self._ble_held:
+                self.later(max(wait, 0.0) * 1000.0, self._ble_release, "ble-settle")
+            self._ble_held.append((bytes(data), uuid))
+            return
+        self._ble_deliver(data, uuid)
+
+    def _ble_release(self) -> None:
+        held, self._ble_held = self._ble_held, []
+        if self.ble_connected:
+            for data, uuid in held:
+                self._ble_deliver(data, uuid)
+
+    def _ble_deliver(self, data: bytes, uuid: str) -> None:
         if self.cfg.ble_rx_mode == "urc":
             self.send(f"\r\n+QBLEGATTSWRITE: {uuid},{len(data)},".encode() + data + b"\r\n")
         else:

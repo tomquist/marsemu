@@ -1025,3 +1025,201 @@ def test_ui_ct003_session_reads_the_p1_meter():
     assert snap["meter"]["type"] == "HME-3" and snap["meter"]["source"] == "p1"
     assert snap["meter"]["last"][0] == "HME-3" and len(snap["meter"]["last"]) == 28
     assert [int(v) for v in snap["meter"]["last"][4:8]] == [-100, -100, 200, 0]
+
+
+def _frame(cmd: int, payload: bytes = b"") -> bytes:
+    body = bytes([0x73, 4 + len(payload) + 1, 0x23, cmd]) + payload
+    x = 0
+    for b in body:
+        x ^= b
+    return body + bytes([x])
+
+
+def _venus3_ble_session(online=False, **kw):
+    """A dashboard Venus E 3.0 session with its Bluetooth on a WebSocket, once
+    the firmware advertises (with ``online``: once its MQTT session is up,
+    the device fully booted); returns (session, server)."""
+    import time
+    from marsemu.blews import serve_ble_ws
+    from marsemu.ui import session as S
+    ctl, bms = _venus3_images()
+    s = S.VenusE3Session(ctl, bms=bms, speed=0, **kw)
+    s.start()
+    srv = serve_ble_ws(lambda: s.emu, 0)
+    deadline = time.time() + 600
+    while time.time() < deadline:
+        mod = s.emu.fc41d
+        if mod.ble_adv and mod.ble_name and (
+                not online or any(m.connected for m in mod.mqtt.values())):
+            return s, srv
+        time.sleep(0.5)
+    srv.shutdown()
+    s.stop()
+    pytest.fail("the firmware never started advertising")
+
+
+@pytest.mark.firmware
+def test_venus3_answers_over_the_ble_websocket():
+    """A WebSocket central (what hmjs' emulator transport is) reaches the
+    control firmware: the device announces its advertised name, and a device
+    info request comes back as one notification with a valid checksum."""
+    import json
+    from test_blews import Client
+    s, srv = _venus3_ble_session(online=True)
+    try:
+        c = Client(srv.server_address[1])
+        info, kind = c.recv()
+        assert kind == 1
+        info = json.loads(info)
+        assert info["name"].startswith("MST_VNSE3_") and info["advertising"]
+        # the first write, straight after connecting: the module holds it
+        # until the firmware has taken the connection up (BLE_SETTLE_S)
+        c.s.settimeout(10)
+        c.send(_frame(0x04, b"\x01"))
+        reply, kind = c.recv()
+        while kind != 2:
+            reply, kind = c.recv()
+        assert reply[0] == 0x73 and reply[2] == 0x23 and reply[3] == 0x04
+        assert b"type=VNSE3-0" in reply and b"dev_ver=151" in reply, reply
+        x = 0
+        for b in reply[:-1]:
+            x ^= b
+        assert x == reply[-1], reply.hex()
+        c.close()
+    finally:
+        srv.shutdown()
+        s.stop()
+
+
+@pytest.mark.firmware
+def test_hmjs_demo_reads_and_sets_the_emulated_venus3():
+    """The hmjs demo in a browser, as "Open in hmjs" on the dashboard opens
+    it: it finds the device, shows what the plant shows and its DoD setting
+    reaches the firmware. Needs HMJS_DEMO (a built demo: hmjs/demo/dist) and
+    Node with Playwright."""
+    import functools
+    import http.server
+    import json
+    import shutil
+    import subprocess
+    import threading
+    demo = os.environ.get("HMJS_DEMO")
+    if not demo or not os.path.isfile(os.path.join(demo, "index.html")):
+        pytest.skip("set HMJS_DEMO to a built hmjs demo (hmjs/demo/dist)")
+    node = shutil.which("node")
+    if not node or subprocess.run([node, "-e", "require('playwright')"], capture_output=True).returncode:
+        pytest.skip("needs Node with Playwright")
+    web = http.server.ThreadingHTTPServer(
+        ("127.0.0.1", 0), functools.partial(http.server.SimpleHTTPRequestHandler, directory=demo))
+    threading.Thread(target=web.serve_forever, daemon=True).start()
+    # as a user would, once the device has booted: while it brings up Wi-Fi
+    # and MQTT, the firmware drops some of what arrives over Bluetooth
+    s, srv = _venus3_ble_session(online=True, soc=63, load=437)
+    try:
+        script = os.path.join(os.path.dirname(__file__), "e2e", "hmjs_demo.cjs")
+        r = subprocess.run([node, script, f"http://127.0.0.1:{web.server_address[1]}/",
+                            f"ws://127.0.0.1:{srv.server_address[1]}/"],
+                           capture_output=True, text=True, timeout=300)
+        assert r.returncode == 0, r.stderr
+        ui = json.loads(r.stdout.strip().splitlines()[-1])
+        snap = s.read()["snapshot"]
+    finally:
+        srv.shutdown()
+        s.stop()
+        web.shutdown()
+    assert "Venus E 3.0" in ui["device"]
+    assert not ui["errors"], ui["errors"]
+    assert abs(float(ui["soc"].split()[0]) - snap["pack"]["soc"]) < 3, (ui, snap["pack"])
+    cells = [int(v) for v in ui["cells"].replace("mV", "").split(",")]
+    assert len(cells) == 16 and all(3000 < v < 3600 for v in cells)
+    assert ui["dod"] == "80 %"
+
+
+@pytest.mark.firmware
+def test_venus3_as_a_ble_peripheral():
+    """The emulated Venus E 3.0 as a Bluetooth LE peripheral (Bumble, on an
+    in-memory link): a central scans, finds the name the firmware set,
+    connects, finds its service and gets its device info as a notification."""
+    pytest.importorskip("bumble")
+    import asyncio
+    from bumble.controller import Controller
+    from bumble.core import UUID
+    from bumble.device import Device, Peer
+    from bumble.hci import Address
+    from bumble.host import Host
+    from bumble.link import LocalLink
+    from bumble.transport.common import AsyncPipeSink
+    from marsemu.bleperiph import BlePeripheral
+    from test_bleperiph import scan
+    ctl, bms = _venus3_images()
+    from marsemu.ui import session as S
+    import time
+    s = S.VenusE3Session(ctl, bms=bms, speed=0)
+    s.start()
+    deadline = time.time() + 600
+    while not any(m.connected for m in s.emu.fc41d.mqtt.values()) and time.time() < deadline:
+        time.sleep(0.5)                     # booted, as in the browser test
+    link = LocalLink()
+    p = BlePeripheral(s.emu, None, link=link).start()
+
+    async def phone():
+        c = Controller("phone", link=link)
+        central = Device(name="phone", address=Address("F0:F0:F0:F0:F0:F0"), host=Host(c, AsyncPipeSink(c)))
+        await central.power_on()
+        address, name = await scan(central, 600)
+        conn = await central.connect(address)
+        peer = Peer(conn)
+        await peer.request_mtu(247)
+        await peer.discover_services()
+        await peer.discover_characteristics()
+        (ff01,) = peer.get_characteristics_by_uuid(UUID("FF01"))
+        (ff02,) = peer.get_characteristics_by_uuid(UUID("FF02"))
+        got = asyncio.Queue()
+        await peer.subscribe(ff02, lambda v: got.put_nowait(bytes(v)))
+        await ff01.write_value(_frame(0x04, b"\x01"))
+        reply = await asyncio.wait_for(got.get(), 30)
+        await conn.disconnect()
+        return name, reply
+
+    try:
+        name, reply = asyncio.run_coroutine_threadsafe(phone(), p.loop).result(900)
+    finally:
+        p.close()
+        s.stop()
+    assert name.startswith("MST_VNSE3_")
+    assert reply[3] == 0x04 and b"type=VNSE3-0" in reply and b"dev_ver=151" in reply, reply
+
+
+@pytest.mark.firmware
+def test_venus3_through_the_corebluetooth_peripheral():
+    """The CoreBluetooth peripheral with the Venus E 3.0 firmware, macOS
+    played by the stand-in of test_bleperiph_macos: the firmware's GATT
+    setup and name reach "macOS", and a central's device info request comes
+    back as a notification."""
+    import time
+    from types import SimpleNamespace
+    from marsemu.bleperiph_macos import CoreBluetoothPeripheral
+    from marsemu.ui import session as S
+    from test_bleperiph_macos import MANAGERS, Central, fake_cb, until
+    ctl, bms = _venus3_images()
+    s = S.VenusE3Session(ctl, bms=bms, speed=0)
+    s.start()
+    deadline = time.time() + 600
+    while not any(m.connected for m in s.emu.fc41d.mqtt.values()) and time.time() < deadline:
+        time.sleep(0.5)
+    MANAGERS.clear()
+    p = CoreBluetoothPeripheral(SimpleNamespace(fc41d=s.emu.fc41d), cb=fake_cb()).start()
+    mgr = MANAGERS[0]
+    try:
+        assert until(lambda: mgr.advertising, 10)
+        assert mgr.adverts[-1]["kCBAdvDataLocalName"].startswith("MST_VNSE3_")
+        phone = Central("F00D")
+        mgr.subscribe(phone, "FF02")
+        mgr.write(phone, "FF01", _frame(0x04, b"\x01"))
+        assert until(lambda: mgr.sent, 30), "no notification"
+        uuid, reply = mgr.sent[0]
+    finally:
+        p.close()
+        s.stop()
+    assert uuid == "FF02"
+    assert reply[3] == 0x04 and b"type=VNSE3-0" in reply, reply

@@ -78,6 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="real: TCP/UDP client sockets connect, listeners bind on the host")
     r.add_argument("--listen-offset", type=int, default=0, help="host port = device port + offset")
     r.add_argument("--ble-port", type=int, help="TCP port bridging a BLE central (raw bytes in/out)")
+    r.add_argument("--ble-peripheral", metavar="TRANSPORT", help="be a Bluetooth LE peripheral that phones and browsers find: vhci (a virtual adapter for this Linux host), corebluetooth (this Mac's Bluetooth), or a Bumble transport such as usb:0 or android-netsim (needs marsemu[ble])")
+    r.add_argument("--ble-ws", metavar="[HOST:]PORT", help="serve Bluetooth over WebSocket on [HOST:]PORT (one message per write/notification; hmjs' emulator transport connects to it)")
     r.add_argument("--serve-uart", action="append", default=[], metavar="NAME:PORT",
                    help="serve a UART on a TCP port, raw bytes both ways (e.g. UART5:7005 = B2500 extension bus)")
     r.add_argument("--modbus-port", type=int, help="serve the RS485 Modbus slave as Modbus TCP on this port (Venus)")
@@ -196,6 +198,16 @@ class EventPrinter:
                         return
                     self.out(ch, line)
             e.console_listeners.append(con)
+
+
+def start_ble_ws(emu, spec: str):
+    """``--ble-ws [HOST:]PORT``: serve the emulator's Bluetooth over WebSocket."""
+    from .blews import serve_ble_ws
+    host, _, port = str(spec).rpartition(":")
+    srv = serve_ble_ws(emu, int(port), host or "127.0.0.1")
+    h, p = srv.server_address[:2]
+    print(f"BLE on ws://{h}:{p}/ (hmjs demo: https://tomquist.github.io/hmjs/?emulator=ws://{h}:{p}/)", flush=True)
+    return srv
 
 
 class BleBridge:
@@ -392,6 +404,11 @@ def cmd_run(args) -> int:
         cov = Coverage(emu)
     if args.ble_port:
         BleBridge(emu, args.ble_port)
+    if args.ble_ws:
+        start_ble_ws(emu, args.ble_ws)
+    if args.ble_peripheral:
+        from .bleperiph import start_ble_peripheral
+        start_ble_peripheral(emu, args.ble_peripheral)
     for spec in args.serve_uart:
         from .uartbridge import UartBridge
         name, _, port = spec.rpartition(":")

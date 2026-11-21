@@ -25,6 +25,11 @@ classifiers = [
 [project.optional-dependencies]
 test = ["pytest"]
 serial = ["pyserial"]
+ble = [
+    "bumble>=0.0.235",
+    "pyobjc-framework-CoreBluetooth>=10; sys_platform == 'darwin'",
+    "pyobjc-framework-libdispatch>=10; sys_platform == 'darwin'",
+]
 
 [project.urls]
 Homepage = "https://github.com/tomquist/marsemu"
