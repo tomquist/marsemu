@@ -119,16 +119,25 @@ class HrtimUnit(Base):
         self.ev = self.m.clock.after(max(n, 1), self._period, self.name)
 
     def _period(self) -> None:
+        # The hot path of a power stage (tens of kHz): keep it to dict lookups.
         self.ev = None
-        if not self.running():
+        hrtim = self.hrtim
+        if not (hrtim and hrtim._active and hrtim.enabled(self.key)):
             return
         self.periods += 1
         # compare 1-4 (bits 0-3), repetition (bit 4), update (bit 6) once per period
-        self.regs[0x04] = self.regs.get(0x04, 0) | 0x5F
-        if self.regs.get(0x0C, 0) & 0x7F:
+        regs = self.regs
+        regs[0x04] = regs.get(0x04, 0) | 0x5F
+        irq = regs.get(0x0C, 0) & 0x7F
+        if irq:
             self.update_irq()
-        self.hrtim.unit_period(self)
-        if self.hrtim.listened(self):
+        mask = hrtim.trigger_mask(self.key)
+        if mask:
+            hrtim.fire_triggers(mask)
+        listeners = hrtim.period_listeners
+        for fn in listeners:
+            fn(self)
+        if irq or mask or listeners:
             self._schedule()
 
 
@@ -139,6 +148,8 @@ class Hrtim:
     def __init__(self, machine):
         self.m = machine
         self._active = False
+        self._mask_state = None
+        self._masks: Dict[str, int] = {}
         bus = machine.bus
         self.units: Dict[str, HrtimUnit] = {}
         for k in UNITS:
@@ -202,8 +213,27 @@ class Hrtim:
                     mask |= 1 << i
         return mask
 
+    def trigger_mask(self, key: str) -> int:
+        """ADC triggers (bit i = ADC(i+1)R) unit ``key`` is a source of.
+
+        Cached per value of the four trigger registers: they are set once at
+        start-up, and this runs every period."""
+        r = self.common.regs
+        state = (r.get(0x3C, 0), r.get(0x40, 0), r.get(0x44, 0), r.get(0x48, 0))
+        if state != self._mask_state:
+            self._mask_state = state
+            self._masks = {k: self._trg_mask(k) for k in UNITS}
+        return self._masks[key]
+
+    def fire_triggers(self, mask: int) -> None:
+        listeners = self.adc_listeners
+        for i in range(4):
+            if mask >> i & 1:
+                for fn in listeners:
+                    fn(i + 1)
+
     def listened(self, u: HrtimUnit) -> bool:
-        return bool(u.regs.get(0x0C, 0) & 0x7F) or bool(self._trg_mask(u.key)) or bool(self.period_listeners)
+        return bool(u.regs.get(0x0C, 0) & 0x7F) or bool(self.trigger_mask(u.key)) or bool(self.period_listeners)
 
     def update(self) -> None:
         for u in self.units.values():
@@ -213,11 +243,9 @@ class Hrtim:
                 u.stop()
 
     def unit_period(self, u: HrtimUnit) -> None:
-        mask = self._trg_mask(u.key)
-        for i in range(4):
-            if mask >> i & 1:
-                for fn in self.adc_listeners:
-                    fn(i + 1)
+        mask = self.trigger_mask(u.key)
+        if mask:
+            self.fire_triggers(mask)
         for fn in self.period_listeners:
             fn(u)
 

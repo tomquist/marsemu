@@ -71,6 +71,8 @@ VBUS_PER_COUNT = 0.15271
 VBAT_PER_COUNT = 0.019293064
 IBAT_PER_COUNT = 0.06
 REF = 2048
+TWO_PI = 2 * math.pi
+SQRT2 = math.sqrt(2)
 #: HRTIM inverter compare offset around the duty (CMP1 = c + 680, CMP2 = c - 680)
 CMP_OFFSET = 680
 
@@ -133,6 +135,14 @@ class PowerStage:
         # ADC1's DMA: the firmware does nothing on half transfer; skipping it halves
         # the interrupts of the 30 kHz loop
         m.bus.get("DMA1").ch[1].half_transfer = False
+        # cached for the 30 kHz step
+        self._hz = m.clock.hz
+        self._gpio_a, self._gpio_d = self.gpio["A"], self.gpio["D"]
+        self._a1, self._a2, self._a3 = (self.adc[n].values for n in ("ADC1", "ADC2", "ADC3"))
+        # channels that only carry the mid-rail reference or the NTCs never change
+        a4, a5 = self.adc["ADC4"].values, self.adc["ADC5"].values
+        self._a1[3] = self._a2[4] = a4[4] = a4[2] = a4[1] = REF
+        a5[10] = a5[12] = a5[13] = self._ntc_raw
         self.hrtim.adc_listeners.insert(0, self._on_trigger)
         self.hrtim.active = True
 
@@ -175,68 +185,78 @@ class PowerStage:
 
     # -- one sample
     def _on_trigger(self, trg: int) -> None:
+        # Runs at 30 kHz: locals instead of attribute and method lookups.
         if trg != 1:
             return
         s = self.spec
-        master = self.hrtim.units["M"]
-        ts = master.period_cycles() / self.m.clock.hz or 1 / 30000.0
+        hrtim = self.hrtim
+        units = hrtim.units
+        master = units["M"]
+        ts = master.period_cycles() / self._hz or 1 / 30000.0
         self.samples += 1
         if self.samples % 300 == 1:       # battery voltage changes slowly
             self._vbat = self.pack.voltage
         vbat = self._vbat
-        theta = self.theta + 2 * math.pi * s.grid_hz * ts
-        if theta >= math.pi and self.theta < math.pi or theta >= 2 * math.pi:
+        old = self.theta
+        theta = old + TWO_PI * s.grid_hz * ts
+        if theta >= math.pi and old < math.pi or theta >= TWO_PI:
             self.zero_cross.capture(1)            # zero-crossing detector -> TIM20 CH1 (both edges)
-        self.theta = theta % (2 * math.pi)
-        v_grid = math.sqrt(2) * s.grid_v * math.sin(self.theta)
+        theta %= TWO_PI
+        self.theta = theta
+        v_grid = SQRT2 * s.grid_v * math.sin(theta)
 
         # bridge and inductor
-        bridge = self.bridge_on() and self.vbus > 1.0
-        v_inv = (2 * self.duty() - 1) * self.vbus if bridge else 0.0
-        if bridge and s.dead_time and self.i:
-            # each leg's open time conducts through the diode against the current:
-            # half of it is lost relative to the midpoint duty, per leg
-            v_inv -= math.copysign(self.dead_fraction() * self.vbus, self.i)
-        self.v_inv = v_inv
-        if self.relay_closed() and bridge:
-            self.i += (v_inv - v_grid - s.r_ohm * self.i) * ts / s.l_h
+        vbus = self.vbus
+        i = self.i
+        bridge = (hrtim.outputs & 0xF) == 0xF and vbus > 1.0
+        if bridge:
+            a = units["A"]
+            per = a.period_ticks()
+            c1, c2 = a.compare(1), a.compare(2)
+            duty = min(1.0, max(0.0, (c1 + c2) / 2.0 / per)) if per else 0.5
+            v_inv = (2 * duty - 1) * vbus
+            if s.dead_time and i and per:
+                # each leg's open time conducts through the diode against the current:
+                # half of it is lost relative to the midpoint duty, per leg
+                v_inv -= math.copysign(max(0, c1 - c2) / per * vbus, i)
         else:
-            self.i = 0.0
-        i_dc = (v_inv * self.i / self.vbus) if bridge else 0.0     # out of the bus
+            v_inv = 0.0
+        self.v_inv = v_inv
+        relay = self._gpio_d.pin_out(3)
+        if relay and bridge:
+            i += (v_inv - v_grid - s.r_ohm * i) * ts / s.l_h
+        else:
+            i = 0.0
+        self.i = i
+        i_dc = (v_inv * i / vbus) if bridge else 0.0     # out of the bus
 
         # LLC: couples the bus to n x Vbat
         i_llc = 0.0
         if self.llc_on():
             target = s.llc_ratio * self.llc_gain() * vbat
-            r = s.llc_r_ohm if self.bypass_closed() else s.precharge_r_ohm
-            i_llc = (target - self.vbus) / r
-        self.vbus = max(0.0, self.vbus + (i_llc - i_dc) * ts / s.c_bus_f)
-        p_llc = i_llc * self.vbus                                   # into the bus
+            r = s.llc_r_ohm if self._gpio_a.pin_out(12) else s.precharge_r_ohm
+            i_llc = (target - vbus) / r
+        vbus = max(0.0, vbus + (i_llc - i_dc) * ts / s.c_bus_f)
+        self.vbus = vbus
+        p_llc = i_llc * vbus                                        # into the bus
         p_bat = -(p_llc / s.llc_efficiency if p_llc > 0 else p_llc * s.llc_efficiency)
-        self._ibat = p_bat / vbat if vbat > 1 else 0.0              # + = into the battery
-        self.bat_ah += self._ibat * ts / 3600.0
+        ibat = p_bat / vbat if vbat > 1 else 0.0                    # + = into the battery
+        self._ibat = ibat
+        self.bat_ah += ibat * ts / 3600.0
         self.bat_s += ts
         k = ts / 0.02
-        self.p_ac_avg += (v_grid * self.i - self.p_ac_avg) * k
+        self.p_ac_avg += (v_grid * i - self.p_ac_avg) * k
         self.p_bat_avg += (p_bat - self.p_bat_avg) * k
 
         # ADC inputs
-        v_out = v_grid if self.relay_closed() else v_inv
-        gain_i = self._gain_i
-        a1, a2, a3, a4 = (self.adc[n].values for n in ("ADC1", "ADC2", "ADC3", "ADC4"))
+        v_out = v_grid if relay else v_inv
+        a1, a2, a3 = self._a1, self._a2, self._a3
         a1[9] = _clip(REF + v_out / V_PER_COUNT)
-        a1[3] = REF
         a1[8] = _clip(REF + v_grid / V_PER_COUNT)
-        a2[1] = _clip(REF + self.i / gain_i)
-        a2[4] = REF
+        a2[1] = _clip(REF + i / self._gain_i)
         a3[3] = _clip(vbat / VBAT_PER_COUNT)
-        a3[1] = _clip(self.vbus / VBUS_PER_COUNT)
-        a3[2] = _clip(REF + self._ibat / IBAT_PER_COUNT)
-        a4[4] = REF
-        a4[2] = REF
-        a4[1] = REF
-        a5 = self.adc["ADC5"].values
-        a5[10] = a5[12] = a5[13] = self._ntc_raw
+        a3[1] = _clip(vbus / VBUS_PER_COUNT)
+        a3[2] = _clip(REF + ibat / IBAT_PER_COUNT)
 
     def step_pack(self) -> None:
         """Move the charge of the samples since the last call into the pack, at
@@ -285,6 +305,9 @@ class VenusCE:
         self.pack = pack or LfpPack(cells_n=self.CELLS, capacity_ah=self.CAPACITY_AH)
         self.packs = [self.pack]
         self.control = Emulator(control, **(control_kwargs or {}))
+        # the 30 kHz loop unmasks interrupts ~2000 times a second, which keeps the
+        # machine's adaptive policy switching exits (and flushing) ~150 times a second
+        self.control.machine.keep_exits = True
         self.sim.add_emulator(self.control)
         self.control_can = self.bus.attach(EmulatorCanNode(self.control, "FDCAN2", "control"))
         amps = self.BMS_AMPS_PER_COUNT or AMPS_PER_COUNT

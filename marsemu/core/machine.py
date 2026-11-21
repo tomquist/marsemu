@@ -29,6 +29,7 @@ FP_REGS = tuple(getattr(A, f"UC_ARM_REG_S{i}") for i in range(16))
 FP_FRAME_REGS = FP_REGS + (A.UC_ARM_REG_FPSCR,)
 ENTRY_REGS = (A.UC_ARM_REG_IPSR, A.UC_ARM_REG_CONTROL, A.UC_ARM_REG_SP) + FRAME_REGS + (A.UC_ARM_REG_XPSR,)
 IPSR_LR = (A.UC_ARM_REG_IPSR, A.UC_ARM_REG_LR)
+MASK_REGS = (A.UC_ARM_REG_PRIMASK, A.UC_ARM_REG_BASEPRI, A.UC_ARM_REG_FAULTMASK)
 
 
 class EmulationStopped(Exception):
@@ -62,11 +63,16 @@ class Machine:
         self._exits_busy = 0
         self._exits_hold = hz // 20  # 50 ms
         self._exits_sticky = False
+        #: keep the unmask exits on for good: for firmware that unmasks so
+        #: often that switching them costs more than stopping at each one
+        #: (every switch flushes the translation cache)
+        self.keep_exits = False
         self._exits_off_at = -(1 << 62)
         self._exits_enables: deque = deque()
         self._exits_on_at = (0, 0)
         self._exit_hit_rate = 0.0
         self.flash_base, self.flash_size = flash_base, flash_size
+        self._vectors: dict = {}
         self.sram_base, self.sram_size = sram_base, sram_size
         self.idcode = 0x10036414
         self.consoles: List[Callable[[str, str], None]] = []
@@ -120,6 +126,7 @@ class Machine:
         self.uc.mem_map(base, size)
 
     def load_flash(self, image: bytes, offset: int = 0) -> None:
+        self._vectors.clear()
         ctypes.memmove(ctypes.addressof(self.flash) + offset, image, len(image))
 
     def flash_bytes(self) -> bytes:
@@ -256,6 +263,7 @@ class Machine:
     # ---------------------------------------------------------------- reset
     def reset(self) -> None:
         self.reset_count += 1
+        self._vectors.clear()
         for p in self.bus.peripherals.values():
             p.reset()
         self.nvic.vtor = vt = self.boot_vtor
@@ -281,8 +289,8 @@ class Machine:
 
     # ----------------------------------------------------- exception model
     def _exec_priority(self) -> int:
-        return self.nvic.exec_priority(self.rr(A.UC_ARM_REG_PRIMASK), self.rr(A.UC_ARM_REG_BASEPRI),
-                                       self.rr(A.UC_ARM_REG_FAULTMASK))
+        primask, basepri, faultmask = self.rr_many(MASK_REGS)
+        return self.nvic.exec_priority(primask, basepri, faultmask)
 
     def _take(self, exc: int, return_pc: int) -> None:
         """Exception entry: stack a frame and branch to the vector."""
@@ -327,12 +335,23 @@ class Machine:
         nv.pending[exc] = False
         nv.active.append(exc)
         nv.irq_count[exc] += 1
-        vector = self.r32(nv.vtor + 4 * exc)
+        vector = self._vector(nv.vtor, exc)
         if self.exc_trace:
             log.debug("-> %s (ret=0x%08x) vector 0x%08x", nv.name_of(exc), return_pc, vector)
         self.rw(A.UC_ARM_REG_PC, vector | 1)
         self._sleeping = False
         self._stalled = False
+
+    def _vector(self, vtor: int, exc: int) -> int:
+        """Handler address from the vector table; cached for tables in flash,
+        which only change across a reset (an update)."""
+        key = (vtor, exc)
+        v = self._vectors.get(key)
+        if v is None:
+            v = self.r32(vtor + 4 * exc)
+            if self.flash_base <= vtor < self.flash_base + self.flash_size or vtor < self.flash_size:
+                self._vectors[key] = v
+        return v
 
     def _exception_return(self, exc_return: int) -> None:
         nv = self.nvic
@@ -682,6 +701,8 @@ class Machine:
                 clock.advance(cpi)
                 continue
             if table:
+                if self.keep_exits and not self._exits_on:
+                    self._set_exits(True)
                 masked = self._masked_pending()
                 if masked:
                     if not self._exits_on:
@@ -712,7 +733,7 @@ class Machine:
                     self._exits_on_at = (clock.cycles, self.unmask_hits)
                     if self._exit_hit_rate >= 2000:
                         self._exits_sticky = False
-                if self._exits_on and not masked and clock.cycles - self._exits_busy > (
+                if self._exits_on and not masked and not self.keep_exits and clock.cycles - self._exits_busy > (
                         self._exits_hold if self._exits_sticky else 0):
                     # firmware with frequent long critical sections would make
                     # us flush the translation cache constantly: switch off

@@ -550,7 +550,7 @@ class DmaChannel:
             half = self.total // 2
             if self.half_transfer and n > half > n - k:
                 k = n - half                     # stop at the half-transfer point
-            chunk = values[i:i + k]
+            chunk = values if k == len(values) else values[i:i + k]
             addr = regs.get(self.off + 12, 0) + self.pos * size
             data = struct.pack(_PACK[size] % len(chunk), *[v & mask for v in chunk])
             try:

@@ -186,3 +186,21 @@ def test_uart_baud_follows_its_apb_clock():
     u6.regs[u6.O_BRR] = 625                    # 72 MHz / 625
     assert abs(u2.baud() - 115200) < 300 and u6.baud() == 115200
     assert u2.byte_cycles() == m.clock.us_to_cycles(10_000_000 / u2.baud())
+
+
+def test_peripheral_errors_stop_the_emulation():
+    """An exception in a peripheral model, raised from inside an MMIO access,
+    stops the emulation and surfaces from emu_start."""
+    import pytest
+
+    # ldr r0, =0x40013800 ; ldr r1, [r0] ; b .
+    main = thumb(0x4801, 0x6801, 0xE7FE, 0x0000, 0x3800, 0x4001)
+    m, img = make(main)
+    boot(m, img)
+    uart = m.bus.owner(0x40013800)
+
+    def broken(off):
+        raise RuntimeError("model bug")
+    uart.read32 = broken
+    with pytest.raises(RuntimeError, match="model bug"):
+        m.uc.emu_start(BASE + 0x401, 0, count=20)

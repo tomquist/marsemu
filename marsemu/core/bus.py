@@ -173,6 +173,8 @@ class Bus:
         self.unknown_names: Dict[int, str] = {}
         #: address -> (peripheral, offset), filled on first access
         self._routes: Dict[int, tuple] = {}
+        #: ctypes callbacks of the directly mapped windows (kept alive here)
+        self._mmio_callbacks: List[tuple] = []
 
     def attach(self, p: Peripheral) -> Peripheral:
         self._routes.clear()
@@ -238,8 +240,66 @@ class Bus:
             else:
                 p.write(off, sz, value)
 
-        uc.mmio_map(base, size, rd, None, wr, None)
+        if not self._map_direct(uc, base, size, routes):
+            uc.mmio_map(base, size, rd, None, wr, None)
         self.windows.append((base, size, rd, wr))
+
+    def _map_direct(self, uc, base: int, size: int, routes) -> bool:
+        """Register the window's callbacks with unicorn's C API directly.
+
+        Firmware driving a power stage touches peripheral registers hundreds
+        of thousands of times per second; the binding's ``mmio_map`` puts two
+        Python layers in front of each access. These callbacks do the same
+        routing in one, with the binding's error handling: an exception stops
+        the emulation and is raised from ``emu_start``. Returns False (use the
+        binding) if its internals are not as expected."""
+        try:
+            from unicorn.unicorn_py3 import unicorn as ucmod
+            read_t, write_t, lib = ucmod.MMIO_READ_CFUNC, ucmod.MMIO_WRITE_CFUNC, ucmod.uclib
+            handle = uc._uch
+            uc._hook_exception  # noqa: B018 - the binding reports hook errors here
+        except (ImportError, AttributeError):
+            return False
+        route = self.route
+        bus = self
+
+        def fail(e):
+            if uc._hook_exception is None:
+                uc._hook_exception = e
+            uc.emu_stop()
+
+        def rd(_h, offset, sz, _ud):
+            try:
+                addr = base + offset
+                p, off = routes.get(addr) or route(addr)
+                v = p.read32(off) if sz == 4 and not off & 3 else p.read(off, sz)
+                if bus.tracers:
+                    for t in bus.tracers:
+                        t("r", p, off, sz, v)
+                return v
+            except BaseException as e:
+                fail(e)
+                return 0
+
+        def wr(_h, offset, sz, value, _ud):
+            try:
+                addr = base + offset
+                p, off = routes.get(addr) or route(addr)
+                if bus.tracers:
+                    for t in bus.tracers:
+                        t("w", p, off, sz, value)
+                if sz == 4 and not off & 3:
+                    p.write32(off, value & 0xFFFFFFFF)
+                else:
+                    p.write(off, sz, value)
+            except BaseException as e:
+                fail(e)
+
+        cb_r, cb_w = read_t(rd), write_t(wr)
+        if lib.uc_mmio_map(handle, base, size, cb_r, None, cb_w, None) != 0:
+            return False
+        self._mmio_callbacks.append((cb_r, cb_w))   # the C side holds no reference
+        return True
 
     # direct access helpers (no tracing), used by DMA etc.
     def read(self, addr: int, size: int = 4) -> int:
