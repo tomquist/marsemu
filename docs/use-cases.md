@@ -27,6 +27,23 @@ Examples by task, with the options that do it. `CONTROL.bin`, `BMS.bin` and
   ```bash
   marsemu b2500 FIRMWARE.bin --pv 300,300 --load 200 --realtime --ble-port 7001
   ```
+* *Use the [hmjs](https://github.com/tomquist/hmjs) demo* on an emulated
+  device, in any browser and without a Bluetooth adapter: its settings,
+  schedules and readings for every device
+  ([over WebSocket](interfaces.md#over-websocket)). The dashboard's **Open
+  in hmjs** button does the same.
+  ```bash
+  marsemu venus3 CONTROL.bin BMS.bin --realtime --ble-ws 7101
+  # https://tomquist.github.io/hmjs/?emulator=ws://localhost:7101/
+  ```
+* *Use a phone, the Marstek app or Chrome's device picker* on an emulated
+  device: it advertises and connects like the real one, through a virtual
+  adapter on Linux, a USB dongle, a Mac's Bluetooth or the Android emulator
+  ([as a Bluetooth device](interfaces.md#as-a-bluetooth-device)).
+  ```bash
+  pip install 'marsemu[ble]'
+  marsemu venus3 CONTROL.bin BMS.bin --realtime --ble-peripheral usb:0
+  ```
 * *Exercise a Venus D/A stack* with several packs and look at what the app,
   MQTT and Modbus report for each pack (`--packs 3`).
 

@@ -1440,12 +1440,24 @@ $("playBtn").addEventListener("click", () => control({ op: "pause", on: !!(SN &&
 $("stepBtn").addEventListener("click", () => control({ op: "step", s: 1 }));
 $("stopBtn").addEventListener("click", () => post("api/stop").catch((e) => log("EVT", "", "stop failed: " + e.message)));
 // hmjs (the Bluetooth tool in the browser) talks to the running device through
-// api/ble. A page on https may only open ws:// to localhost, so the link works
-// when this dashboard is opened on the computer running marsemu.
+// api/ble. Its hosted demo is an https page, which browsers let open ws:// only
+// to the computer they run on, and wss:// anywhere: the link cannot work on a
+// dashboard opened from another machine over plain http.
 {
   const ws = new URL("api/ble", location.href);
   ws.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  $("hmjsBtn").href = "https://tomquist.github.io/hmjs/?emulator=" + encodeURIComponent(ws.href);
+  const btn = $("hmjsBtn");
+  if (location.protocol === "https:" || isLoopback(location.hostname)) {
+    btn.href = "https://tomquist.github.io/hmjs/?emulator=" + encodeURIComponent(ws.href);
+  } else {
+    btn.classList.add("disabled");
+    btn.setAttribute("aria-disabled", "true");
+    btn.title = "The hosted hmjs demo can reach this dashboard over ws:// only from the computer running " +
+      "marsemu (open it at localhost), or over https";
+  }
+}
+function isLoopback(host) {
+  return host === "localhost" || host === "[::1]" || /^127\./.test(host);
 }
 // the Venus E Mini answers the two-digit command only
 const statusCmd = () => (MODEL === "Venus E Mini" ? "cd=01" : "cd=1");
