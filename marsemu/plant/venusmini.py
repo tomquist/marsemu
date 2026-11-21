@@ -43,8 +43,11 @@ Inverter (0x81)
   as a 32-bit value (``ig``), word 14 backup-socket power (``lp``).
 * ``0x40``..``0x46`` read and ``0x60``..``0x66`` write the inverter's
   parameter blocks (68, 52, 116, 94, 102, 60 bytes); a write is answered with
-  the block as stored.  Block 0x40 word 31 is the feed-in limit (``gps``:
-  0 = 800 W, 1 = 1500 W).
+  the block as stored.  Block 0x40 word 31 (``gps``, ``cd=57``'s first
+  value) sets the inverter's discharge limit, 0 = 800 W and 1 = 1250 W (the
+  app calls it 1500 W); block 0x41 word 3 (``ogpc``, ``cd=57``'s second
+  value) its grid-charge limit, 0 = 1250 W and 1 = 800 W (Micro 270,
+  ``0x08011e30``).
 * ``0x21`` (20 bytes, every 0.6 s): word 0 the grid power the battery is to
   cover (W, + = import, the meter's reading on the battery's phase), word 9
   1 while the meter reading is valid.
@@ -257,10 +260,10 @@ class MiniBoard(UartDevice):
 class MiniLimits:
     """Inverter limits (W)."""
 
-    #: charge power limit (grid charging)
-    charge_w: float = 800.0
-    #: feed-in limits by the ``gps`` preset (block 0x40 word 31)
-    feed_in_w: tuple = (800.0, 1500.0)
+    #: grid-charge limits by ``ogpc`` (block 0x41 word 3): 0 -> 1250 W, 1 -> 800 W
+    charge_w: tuple = (1250.0, 800.0)
+    #: discharge (feed-in) limits by ``gps`` (block 0x40 word 31): 0 -> 800 W, 1 -> 1250 W
+    feed_in_w: tuple = (800.0, 1250.0)
 
 
 class MiniInverter(MiniBoard):
@@ -302,6 +305,10 @@ class MiniInverter(MiniBoard):
         gps = struct.unpack_from(">H", self.blocks[0x40], 62)[0]
         return self.limits.feed_in_w[1 if gps == 1 else 0]
 
+    def charge_limit(self) -> float:
+        ogpc = struct.unpack_from(">H", self.blocks[0x41], 6)[0]
+        return self.limits.charge_w[1 if ogpc == 1 else 0]
+
     def handle(self, cmd: int, p: bytes) -> Optional[bytes]:
         if cmd == 0x01:
             return self.status()
@@ -337,7 +344,7 @@ class MiniInverter(MiniBoard):
             return
         g = self.grid_import
         if self.charging_state:
-            self.charge_ref = max(0.0, min(self.limits.charge_w, self.charge_ref - g / 2))
+            self.charge_ref = max(0.0, min(self.charge_limit(), self.charge_ref - g / 2))
             self._switch = self._switch + 1 if (self.charge_ref == 0 and g > 20) else 0
             if self._switch >= 3:
                 self.charging_state, self._switch, self.discharge_ref = False, 0, -20.0
@@ -349,7 +356,7 @@ class MiniInverter(MiniBoard):
 
     def target(self) -> float:
         if self.mode == 1:
-            ref = -min(float(self.mode_power), self.limits.charge_w)
+            ref = -min(float(self.mode_power), self.charge_limit())
         elif self.mode == 2:
             ref = min(float(self.mode_power), self.feed_in_limit())
         elif self.meter_ok:
@@ -556,7 +563,7 @@ class VenusMini:
             "dc_w": round(inv.dc_power, 1), "soc": round(self.pack.soc * 100, 2), "bms_soc": soc,
             "pack_v": round(self.pack.voltage, 3), "i_a": round(self.pack.current_a, 2),
             "cells_v": [round(v, 3) for v in self.pack.cell_voltages],
-            "limits": [round(inv.feed_in_limit()), -round(inv.limits.charge_w)], "connected": inv.connected,
+            "limits": [round(inv.feed_in_limit()), -round(inv.charge_limit())], "connected": inv.connected,
             "mode": inv.mode, "mode_w": inv.mode_power, "grid_import_w": inv.grid_import, "meter_ok": inv.meter_ok,
             "dcdc_on": self.dcdc.on, "temp_c": round(self.pack.temp_c, 1),
         }

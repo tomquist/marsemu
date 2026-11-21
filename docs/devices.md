@@ -154,8 +154,10 @@ capacity); the DC/DC boosts it to the inverter.
   from the control's request builders and reply handlers, its regulator from
   the Micro 270 image. The control forwards the meter reading of the
   battery's phase (`0x21`) and the inverter regulates on it: the discharge
-  power moves by half the grid power per reading, up to the feed-in limit
-  (800 W, or 1500 W with the `gps` preset). For the phase detection, the
+  power moves by half the grid power per reading, up to the discharge limit
+  (800 W, or 1250 W with `cd=57`'s first value; the app calls it 1500 W), and
+  the charge power up to 1250 W (800 W with its second value). For the phase
+  detection, the
   backup mode, the forced charge below 5 % SOC and schedules, the control
   commands a fixed charge or discharge power instead (`0x72`). Micro 270
   itself boots in the emulator (`aux-g4`), at about 1/40 of real time.

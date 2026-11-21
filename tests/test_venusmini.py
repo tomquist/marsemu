@@ -58,10 +58,15 @@ def test_inverter_answers_polls_and_echoes_parameter_writes():
     hz, volts = struct.unpack_from(">HH", realtime, 0)
     assert hz > 4000 and volts > 800                              # the control sees a grid
     block = bytearray(68)
-    block[62:64] = struct.pack(">H", 1)                           # gps = 1: the 1500 W preset
+    block[62:64] = struct.pack(">H", 1)                           # gps = 1: the "1500 W" preset
     (_, _, cmd, echo), = requests(inv, frame(CONTROL, INVERTER, 0x60, bytes(block)))
     assert cmd == 0x60 and echo == bytes(block)
-    assert inv.feed_in_limit() == 1500.0
+    assert inv.feed_in_limit() == 1250.0                          # Micro 270 caps it at 1250 W
+    assert inv.charge_limit() == 1250.0
+    block41 = bytearray(52)
+    block41[6:8] = struct.pack(">H", 1)                           # ogpc = 1: grid charging capped at 800 W
+    requests(inv, frame(CONTROL, INVERTER, 0x61, bytes(block41)))
+    assert inv.charge_limit() == 800.0
 
 
 def meter(inv, grid_w, n=1):

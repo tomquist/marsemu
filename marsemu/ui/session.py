@@ -1004,7 +1004,7 @@ class VenusMiniSession(DeviceSession):
                "battery_w": rep.get("battery_w")}
         inverter = {"reference": round(inv.reference, 1), "ac": round(inv.ac_power, 1), "dc": round(inv.dc_power, 1),
                     "connected": bool(inv.connected), "limit_discharge": round(inv.feed_in_limit()),
-                    "limit_charge": -round(inv.limits.charge_w), "charge_limit_w": round(inv.limits.charge_w),
+                    "limit_charge": -round(inv.charge_limit()), "charge_limit_w": round(inv.charge_limit()),
                     "discharge_limit_w": round(inv.feed_in_limit()), "mode": inv.mode, "mode_w": inv.mode_power,
                     "grid_import": inv.grid_import, "meter_ok": inv.meter_ok,
                     "regulating": "charge" if inv.charging_state else "discharge",
