@@ -117,6 +117,60 @@ def test_venus_mini_finds_its_phase_and_regulates_the_grid():
         v.close()
 
 
+@pytest.mark.firmware
+def test_venus_mini_stops_at_its_depth_of_discharge_and_charges_when_empty():
+    """The control's BMS: discharging, it clears the DC/DC's discharge
+    permission (0x90 word 1) below its depth of discharge (10 % with do=90)
+    and the house falls back on the grid; below 5 % it charges from the grid
+    with a fixed 1000 W."""
+    from marsemu.plant.battery import LfpPack
+    from marsemu.plant.venus3_cli import House, configure_self_consumption, connect_house
+    from marsemu.plant.venusmini import VenusMini
+    v = VenusMini(_mini_image(), pack=LfpPack(cells_n=2, capacity_ah=314, soc=0.103))
+    house = House({"A": 600.0})
+    connect_house(v, house)
+    configure_self_consumption(v)
+    try:
+        v.run(90, until=lambda: v.ac_power > 500)
+        assert v.ac_power > 500, "should cover the load above its depth of discharge"
+        v.run(240, until=lambda: not v.dcdc.discharge_allowed)
+        assert not v.dcdc.discharge_allowed and v.pack.soc > 0.095
+        v.run(10)
+        assert abs(v.ac_power) < 20 and house.grid()["A"] > 550
+    finally:
+        v.close()
+    v = VenusMini(_mini_image(), pack=LfpPack(cells_n=2, capacity_ah=314, soc=0.04))
+    connect_house(v, House({"A": 600.0}))
+    try:
+        v.run(60, until=lambda: v.ac_power < -900)
+        assert v.inverter.mode == 1 and v.inverter.mode_power == 1000 and v.ac_power < -900
+    finally:
+        v.close()
+
+
+@pytest.mark.firmware
+def test_venus_mini_tapers_and_ends_a_charge():
+    """Near full the control lowers the DC/DC's charge limit (0x90 word 3)
+    while a cell is above 3.45 V, then switches the converter off."""
+    from marsemu.plant.battery import LfpPack
+    from marsemu.plant.venus3_cli import House, configure_self_consumption, connect_house
+    from marsemu.plant.venusmini import VenusMini
+    v = VenusMini(_mini_image(), pack=LfpPack(cells_n=2, capacity_ah=314, soc=0.98))
+    connect_house(v, House({"A": -900.0}))
+    configure_self_consumption(v)
+    limits = []
+    try:
+        v.run(90, until=lambda: v.ac_power < -800)
+        assert v.ac_power < -800, "should charge from the export"
+        v.run(600, until=lambda: (limits.append(v.dcdc.values[0]) or True) and not v.dcdc.on)
+        assert not v.dcdc.on, "should end the charge"
+        assert min(limits) <= 400, "should taper the charge power first"
+        v.run(5)
+        assert v.pack.soc > 0.99 and abs(v.ac_power) < 20, f"soc {v.pack.soc:.4f}, ac {v.ac_power:.0f} W"
+    finally:
+        v.close()
+
+
 def _venus3_images():
     if not EXTRA:
         pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")

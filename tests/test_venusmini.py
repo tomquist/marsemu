@@ -152,3 +152,24 @@ def test_cells_take_a_curve_of_their_own():
     from marsemu.plant.battery import LFP_OCV, Cell, _interp
     assert Cell(100, 0.5).ocv() == _interp(LFP_OCV, 0.5)
     assert Cell(100, 0.5, ocv_curve=lambda soc: 3.0 + soc).ocv() == 3.5
+
+
+def test_dcdc_carries_the_controls_permissions_and_limits():
+    """0x90: word 1 allows discharging, word 2 charging, words 3/4 cap the
+    charge and discharge power (W)."""
+    emu = FakeEmu()
+    dc = MiniDcdc(emu, LfpPack(cells_n=2, capacity_ah=314, soc=0.5))
+    requests(dc, frame(CONTROL, DCDC, 0x90, struct.pack(">6H", 1, 0, 1, 300, 1500, 1)))
+    assert dc.on and not dc.discharge_allowed and dc.charge_allowed
+    assert dc.limit(-900.0) == -300.0 and dc.limit(600.0) == 600.0
+    requests(dc, frame(CONTROL, DCDC, 0x90, struct.pack(">6H", 1, 1, 1, 1500, 400, 0)))
+    assert dc.discharge_allowed and dc.limit(600.0) == 400.0 and dc.limit(-900.0) == -900.0
+
+
+def test_cells_rise_at_the_end_of_a_charge_and_relax_at_rest():
+    from marsemu.plant.battery import Cell
+    c = Cell(314, 1.0, ocv_curve=lambda soc: 3.38, charge_knee_v=0.25)
+    assert c.voltage(0.0) == 3.38                                   # resting: the table's full voltage
+    assert abs(c.voltage(10.0) - (3.38 + 10 * c.r_ohm + 0.25)) < 1e-9
+    c.soc = 0.5
+    assert abs(c.voltage(10.0) - (3.38 + 10 * c.r_ohm)) < 1e-9      # no rise away from full

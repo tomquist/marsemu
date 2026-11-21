@@ -43,13 +43,24 @@ class Cell:
     v_rc: float = 0.0
     #: SOC (0..1) -> open-circuit voltage, V; default: the generic :data:`LFP_OCV`
     ocv_curve: Optional[Callable[[float], float]] = None
+    #: the steep rise of an LFP cell at the end of charge, V at SOC 1 while
+    #: charging (0: none). An OCV curve taken from a BMS's own tables stops at
+    #: the resting voltage of a full cell; this is what makes the voltage
+    #: under charge reach the BMS's cut-off. It follows the SOC, not the
+    #: current, so a BMS that tapers the current on the voltage settles.
+    charge_knee_v: float = 0.0
+    charge_knee_soc: float = 0.97
 
     def ocv(self) -> float:
         soc = min(1.0, max(0.0, self.soc))
         return self.ocv_curve(soc) if self.ocv_curve is not None else _interp(LFP_OCV, soc)
 
     def voltage(self, current_a: float) -> float:
-        return self.ocv() + current_a * self.r_ohm + self.v_rc
+        v = self.ocv() + current_a * self.r_ohm + self.v_rc
+        if self.charge_knee_v and current_a > 0 and self.soc > self.charge_knee_soc:
+            x = (min(1.0, self.soc) - self.charge_knee_soc) / (1.0 - self.charge_knee_soc)
+            v += self.charge_knee_v * x ** 4
+        return v
 
 
 @dataclass

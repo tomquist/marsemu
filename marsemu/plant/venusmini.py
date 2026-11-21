@@ -34,7 +34,9 @@ and reply handlers (Control 309) and the inverter firmware (Micro 270):
 Inverter (0x81)
 
 * ``0x01`` status, 80 bytes: word 0 grid state (``gs``), words 2..13 six
-  32-bit counters (``e1``..``e6``), word 16 firmware version (``inv``),
+  32-bit fault and warning bitfields (``e1``..``e6``; Micro 270 keeps them at
+  ``0x20001428``..``0x2000143c`` and never sets ``e1`` or ``e5``; the model
+  reports no faults), word 16 firmware version (``inv``),
   word 38 a state the control watches, word 39 device state (``dev_sta``:
   0 standby, 1 charging, 2 discharging).
 * ``0x02`` realtime, 82 bytes: word 0 grid frequency (0.01 Hz), word 1 grid
@@ -43,7 +45,11 @@ Inverter (0x81)
   as a 32-bit value (``ig``), word 14 backup-socket power (``lp``).
 * ``0x40``..``0x46`` read and ``0x60``..``0x66`` write the inverter's
   parameter blocks (68, 52, 116, 94, 102, 60 bytes); a write is answered with
-  the block as stored.  Block 0x40 word 31 (``gps``, ``cd=57``'s first
+  the block as stored.  Block 0x40 words 4..6 are ``cd=54``'s values: Micro
+  270 stores the first two and does not use them, and takes the third as
+  the power to return to when its over-frequency derating ends (LFSM-O: from
+  50.2 Hz, tripping at 52 and 48 Hz, ``0x08018884``) - not modelled, the
+  emulated grid stays at 50 Hz.  Block 0x40 word 31 (``gps``, ``cd=57``'s first
   value) sets the inverter's discharge limit, 0 = 800 W and 1 = 1250 W (the
   app calls it 1500 W); block 0x41 word 3 (``ogpc``, ``cd=57``'s second
   value) its grid-charge limit, 0 = 1250 W and 1 = 800 W (Micro 270,
@@ -66,8 +72,12 @@ DC/DC (0x82)
   (0.1 degC), +0x24 firmware version (``dcdc``).
 * ``0x81``/``0x91`` read/write a 68-byte parameter block (current-sensor
   zero calibration among others).
-* ``0x90`` (12 bytes): three switches and three values; ``1,1,1,0,0,0`` while
-  the battery is fine.  Taken here as: word 0 converter on.
+* ``0x90`` (12 bytes): word 0 converter on, word 1 discharge allowed (cleared
+  below the depth of discharge, when word 5 is set), word 2 charge allowed,
+  word 3 the charge power limit (W; the lower of a temperature derating and a
+  pack-voltage taper, 1500 W at 6.9 V falling linearly towards 0 at 7.2 V,
+  300 W at least; control ``0x080168f4``), word 4 the discharge power limit
+  (1500 W).
 
 The inverter's self-consumption regulator follows Micro 270
 (``0x080180fc``): discharging, its power grows by half the grid import per
@@ -107,6 +117,8 @@ DCDC_VERSION = 268          # the DC/DC version offered with Micro 270
 #: the battery: two LFP cells of 314 Ah in series
 CELLS, CAPACITY_AH = 2, 314.0
 CELL_R_OHM = 0.00025
+#: the cells' rise at the end of charge (see Cell.charge_knee_v)
+CELL_CHARGE_KNEE_V = 0.25
 
 
 def crc16(data: bytes) -> int:
@@ -297,6 +309,8 @@ class MiniInverter(MiniBoard):
         self.connected = False
         self._connect_at: Optional[float] = None
         self.enabled: Callable[[], bool] = lambda: True
+        #: the battery side's power limits, applied to the target (W, + = discharge)
+        self.dc_limit: Callable[[float], float] = lambda w: w
         self.temp_c = self.stage.ambient_c
         self.on_reference: List[Callable[[float, float], None]] = []
 
@@ -368,7 +382,7 @@ class MiniInverter(MiniBoard):
     # ------------------------------------------------------------- dynamics
     def step(self, now: float, dt: float) -> None:
         st = self.stage
-        target = self.target() if self.enabled() else 0.0
+        target = self.dc_limit(self.target()) if self.enabled() else 0.0
         if target != self.reference:
             for cb in self.on_reference:
                 cb(self.target(), target)
@@ -436,6 +450,27 @@ class MiniDcdc(MiniBoard):
     def on(self) -> bool:
         return bool(self.switches[0])
 
+    @property
+    def discharge_allowed(self) -> bool:
+        """0x90 word 1: the control clears it below its depth of discharge."""
+        return bool(self.switches[1])
+
+    @property
+    def charge_allowed(self) -> bool:
+        """0x90 word 2."""
+        return bool(self.switches[2])
+
+    def limit(self, watts: float) -> float:
+        """Clamp a power (W, + = discharge) to the 0x90 limits: word 3 the
+        charge power, which the control tapers from 1500 W to 300 W while a
+        cell is above 3.45 V, word 4 the discharge power."""
+        charge_w, discharge_w = self.values[0], self.values[1]
+        if watts < 0 and charge_w:
+            return max(watts, -float(charge_w))
+        if watts > 0 and discharge_w:
+            return min(watts, float(discharge_w))
+        return watts
+
     def handle(self, cmd: int, p: bytes) -> Optional[bytes]:
         if cmd == 0x80:
             return self.realtime()
@@ -492,6 +527,9 @@ class VenusMini:
             # the Mini's cells rest at the voltages the control's SOC tables give
             for c in self.pack.cells:
                 c.ocv_curve = lambda soc, pack=self.pack: mini_ocv(soc, pack.temp_c)
+                # the tables end at a full cell's resting 3.38 V; under charge
+                # it rises past the control's 3.45 V cut-off
+                c.charge_knee_v = CELL_CHARGE_KNEE_V
         kw = dict(control_kwargs or {})
         kw.setdefault("profile", "venus-mini")
         self.control = Emulator(control, **kw)
@@ -500,6 +538,7 @@ class VenusMini:
         self.micro = self.inverter = MiniInverter(self.control, self.sim, stage, limits)
         self.dcdc = MiniDcdc(self.control, self.pack, ambient_c=stage.ambient_c)
         self.inverter.enabled = self._battery_allows
+        self.inverter.dc_limit = self.dcdc.limit
         #: the control's own view, from its last ``cd=01`` report (SOC in %, battery W)
         self.reported: Dict[str, float] = {}
         self.control.on("mqtt_publish", self._note_report)
@@ -517,14 +556,16 @@ class VenusMini:
             pass
 
     def _battery_allows(self) -> bool:
-        """The DC/DC carries power while the control has it on; the cells'
-        hard limits stop it otherwise (the control's BMS acts long before)."""
+        """The DC/DC carries power while the control has it on and allows the
+        direction (0x90 words 1 and 2: the control's BMS clears them at its
+        depth of discharge and at the end of charge); the cells' hard limits
+        stop it otherwise."""
         if not self.dcdc.on:
             return False
         t = self.inverter.target()
-        if t > 0 and self.pack.min_cell_v() <= 2.5:
+        if t > 0 and (not self.dcdc.discharge_allowed or self.pack.min_cell_v() <= 2.5):
             return False
-        if t < 0 and self.pack.max_cell_v() >= 3.65:
+        if t < 0 and (not self.dcdc.charge_allowed or self.pack.max_cell_v() >= 3.65):
             return False
         return True
 
