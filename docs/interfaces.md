@@ -71,10 +71,19 @@ marsemu venus3 VNSE3-0/Control/151/*.bin VNSE3-0/BMS/115/*.bin --realtime --ble-
 # then open https://tomquist.github.io/hmjs/?emulator=ws://127.0.0.1:7101/
 ```
 
-Browsers let an HTTPS page open `ws://localhost`, so the hosted demo
-reaches a local emulator. The dashboard serves the running device's
-Bluetooth the same way at `api/ble`, and its **Open in hmjs** button opens
-the demo connected to it. Writes in the first second (emulated) after a
+The hosted demo is an HTTPS page, and browsers let it open `ws://` only to
+the computer they run on (`localhost`, `127.0.0.1`): run the browser there.
+For an emulator on another machine, put it behind a TLS reverse proxy and
+use `wss://`, or serve the demo over plain HTTP (`npm start` in hmjs).
+`--ble-ws` listens on `127.0.0.1` unless given a host (`--ble-ws
+0.0.0.0:7101`).
+
+The dashboard serves the running device's Bluetooth the same way at
+`api/ble`, and its **Open in hmjs** button opens the demo connected to it.
+The button is greyed out where the browser would block the connection: on
+a dashboard opened from another machine over plain HTTP. Through Home
+Assistant's ingress the connection goes through Home Assistant, which must
+accept it from the demo's page; that has not been tested. Writes in the first second (emulated) after a
 central connects are held until then, as a phone takes about that long
 (service discovery, notifications) before it writes; the firmware drops a
 write that arrives too soon after the connection event. While it brings up
@@ -107,10 +116,28 @@ marsemu venus3 VNSE3-0/Control/151/*.bin VNSE3-0/BMS/115/*.bin --realtime --ble-
 bluetoothctl scan le      # [NEW] Device C8:47:8C:00:00:02 MST_VNSE3_0002
 ```
 
+On Windows, Bumble reaches a USB dongle through libusb, which needs the
+WinUSB driver on it: install that for the dongle with
+[Zadig](https://zadig.akeo.ie/) (the dongle is then no longer Windows' own
+Bluetooth). `vhci` exists only on Linux, and
+`corebluetooth` only on a Mac.
+
 Chrome uses the system's default adapter, so with a real adapter present,
 power it off (`bluetoothctl power off` after `select` on it) or use a
 machine without one. The device advertises with its own MAC as a static
 random address.
+
+The Marstek app talks to the emulated device as to the real one, its
+Wi‑Fi setup included. Adding the device to an account is the cloud's part:
+the app waits for the device to log in to Marstek's broker with an identity
+the cloud knows. The emulated device has one only with `--mqtt cloud` and
+your own device's identity ([MQTT broker](#mqtt-broker-hm2mqtt-hame-relay-mosquitto)),
+with the real device switched off; any other identity is someone else's
+device.
+
+The dashboard (`marsemu ui`) serves Bluetooth only over WebSocket
+(`api/ble`); to make a device a Bluetooth peripheral, run it from the
+command line.
 
 #### On a Mac
 
@@ -133,6 +160,21 @@ Security → Bluetooth). macOS keeps some things to itself:
 - The Mac cannot connect to itself; Chrome on the same Mac does not see it.
   A USB dongle (`usb:0`) works for that: the Mac's own Bluetooth then sees
   the dongle's device.
+
+### In Docker
+
+The image includes no Bluetooth stack, so `--ble-peripheral` needs a
+native install; the TCP and WebSocket links work. Bind them to all
+interfaces and publish the port:
+
+```bash
+docker run --rm -p 7101:7101 -v "$PWD/firmware:/firmware" ghcr.io/tomquist/marsemu:main \
+    venus3 CONTROL.bin BMS.bin --realtime --ble-ws 0.0.0.0:7101
+# then open https://tomquist.github.io/hmjs/?emulator=ws://localhost:7101/
+```
+
+The dashboard's `api/ble` is on its own port (`-p 8080:8080`), so its
+button works from a browser on the same computer.
 
 ## Interactive and GDB
 

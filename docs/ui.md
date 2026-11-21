@@ -30,7 +30,12 @@ data from the running firmware:
   and a speed limit from 0.1× to as fast as the computer can.
 - **Open in hmjs.** Opens the [hmjs](https://github.com/tomquist/hmjs)
   demo in a new tab, connected to the running device's Bluetooth; it reads
-  and changes the device's settings as it would a real one's.
+  and changes the device's settings as it would a real one's. The hosted
+  demo reaches the dashboard only from a browser on the computer running
+  marsemu, or over HTTPS; elsewhere the button is greyed out
+  ([why](interfaces.md#over-websocket)). The dashboard does not make the
+  device a Bluetooth peripheral; the command line does
+  (`--ble-peripheral`).
 
 Every device marsemu models. Pick the image on the start screen; devices
 with a BMS image of their own take it too.
