@@ -514,3 +514,20 @@ def test_connect_house_several_devices_one_meter_function():
                                             (b"poll2", ("192.168.1.52", 12345))]
     assert d1.net.replies[0][1] == b"reply" and d2.net.replies[0][1] == b"reply"
     assert m1.polls == 1 and m2.polls == 1
+
+
+
+def test_only_polls_to_the_ct_port_reach_the_meter():
+    """A CT002/CT003 answers on UDP 12345 only; a Venus E Mini's broadcast to
+    other Minis (60606) must not be answered as a meter poll."""
+    from types import SimpleNamespace as NS
+
+    from marsemu.plant.venus3_cli import House, connect_house
+
+    replies = []
+    net = NS(udp_handler=None, udp_reply=lambda sock, data, dest: replies.append((data, dest)))
+    dev = NS(control=NS(fc41d=NS(net=net, cfg=NS(ip="192.168.1.50"))), sim=NS(tickers=[]), ac_power=0.0)
+    m = connect_house(dev, House({"A": 100.0}), meter=lambda data, src: b"answer")
+    net.udp_handler(NS(local_port=22222), b"poll", ("192.168.1.255", 12345))
+    net.udp_handler(NS(local_port=22222), b"hello minis", ("192.168.1.255", 60606))
+    assert m.polls == 1 and replies == [(b"answer", ("192.168.1.255", 12345))]

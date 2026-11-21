@@ -22,7 +22,7 @@ b.run(30)
 b.close()
 ```
 
-`VenusE3`, `VenusD`, `VenusA`, `VenusCE` (control + BMS image) and `Jupiter`
+`VenusE3`, `VenusD`, `VenusA`, `VenusCE` (control + BMS image), `VenusMini` (control image) and `Jupiter`
 work the same way.
 
 ## Several devices in one house

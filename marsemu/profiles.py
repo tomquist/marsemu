@@ -279,6 +279,9 @@ register(Profile(
     "venus3", "Venus E 3.0 / A / D control board (VNSE3/VNSA/VNSD)", device_type="VNSE3-0", cpi=1,
     setup=[lambda emu: control_eeprom(emu)]))
 register(Profile(
+    "venus-mini", "Venus E Mini (VNSEMINI) control board (PMU), N32G45x, app at 0x08008000",
+    device_type="VNSEMINI-0"))
+register(Profile(
     "jupiter", "Jupiter C/E (HMM/HMN-x) and C Plus (JPLS-8H) control board", device_type="HMN-1"))
 def preloaded_module_certs(emu) -> None:
     """The CT00x firmwares expect the FC41D to hold factory-loaded TLS
@@ -338,6 +341,29 @@ register(Profile(
     hz=170_000_000, sram_kb=128, fc41d_uart=None))
 
 
+#: header of the Venus E Mini's OTA images: 32 ASCII bytes
+#: ``<device type>_<board>_V<version, hex>_<payload size>_<checksum>_FF``
+#: (e.g. ``VNSEMINI-0_PMU_V135_186556_42_FF``) in front of the application
+OTA_HEADER = re.compile(rb"([A-Z0-9]+-\d)_([A-Z]+)_V([0-9A-F]{3,4})_(\d+)_([0-9A-F]{2})_([0-9A-F]{2})")
+OTA_HEADER_SIZE = 32
+
+
+def ota_header(image: bytes) -> Optional[dict]:
+    """The fields of an OTA header in front of the image, or None.  Only a
+    header whose size field matches the payload counts."""
+    m = OTA_HEADER.fullmatch(image[:OTA_HEADER_SIZE])
+    if m is None or int(m.group(4)) != len(image) - OTA_HEADER_SIZE:
+        return None
+    return {"device_type": m.group(1).decode(), "board": m.group(2).decode(),
+            "version": int(m.group(3), 16), "size": int(m.group(4)), "checksum": int(m.group(5), 16)}
+
+
+def strip_header(image: bytes) -> bytes:
+    """The application without an OTA header (see :data:`OTA_HEADER`): what the
+    bootloader writes to flash."""
+    return image[OTA_HEADER_SIZE:] if ota_header(image) else image
+
+
 def _literal_count(image: bytes, words) -> int:
     return sum(image.count(struct.pack("<I", w)) for w in words)
 
@@ -347,6 +373,7 @@ def strings_of(image: bytes) -> List[bytes]:
 
 
 def detect(image: bytes, filename: str = "") -> Profile:
+    image = strip_header(image)
     sp, reset = struct.unpack_from("<II", image, 0)
     has_at = b"AT+QBLE" in image or b"AT+QVERSION" in image
     name = filename.lower()
@@ -356,6 +383,8 @@ def detect(image: bytes, filename: str = "") -> Profile:
         return PROFILES["aux-g4" if g4 > 10 and n32 == 0 else "aux"]
     if (reset & ~0x7FF) == 0x08006800:
         return PROFILES["ct00x"]
+    if b"VNSEMINI-" in image or b"VNSEM-" in image:
+        return PROFILES["venus-mini"]
     if b"VNSE" in image or b"VNSA" in image or b"VNSD" in image or (reset & ~0xF) == 0x08004A60:
         return PROFILES["venus3"]
     if b"MST_AIOS" in image or b"HMN-" in image or b"HMM-" in image:
@@ -375,9 +404,11 @@ def load_base(image: bytes, flash_base: int = 0x08000000) -> int:
     """Address the image is linked for.
 
     Full images (bootloader + app) start at the flash base.  Application-only
-    OTA images have their vector table at the start of the file and a reset
-    handler a few hundred bytes after it, e.g. 0x08002a6d -> 0x08002800.
+    OTA images have their vector table at the start of the file (after an OTA
+    header, if any) and a reset handler a few hundred bytes after it, e.g.
+    0x08002a6d -> 0x08002800.
     """
+    image = strip_header(image)
     sp, reset = struct.unpack_from("<II", image, 0)
     if not (flash_base <= reset < flash_base + 0x100000):
         return flash_base

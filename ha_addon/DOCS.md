@@ -15,7 +15,7 @@ marsemu ships no firmware. Use the firmware of a device you own: open the
 panel and drop the image file into it, or copy it into the add-on's folder
 `/addon_configs/<id>_marsemu/firmware` (the Samba or File editor add-on reach
 it). Every device marsemu models is supported: B2500, Venus E 3.0, D, A and C/E
-(each with its control and BMS image), Jupiter C/E and C Plus, CT002/CT003.
+(each with its control and BMS image), Venus E Mini, Jupiter C/E and C Plus, CT002/CT003.
 
 ## Options
 

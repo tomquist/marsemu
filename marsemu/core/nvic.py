@@ -292,7 +292,7 @@ class Nvic(Peripheral):
         a = self.base + off
         # byte-addressed priority registers
         if size == 1 and (0xE000E400 <= a < 0xE000E500 or 0xE000ED18 <= a < 0xE000ED24):
-            n = 16 + (a - 0xE000E400) if a >= 0xE000E400 else 4 + (a - 0xE000ED18)
+            n = 16 + (a - 0xE000E400) if a < 0xE000E500 else 4 + (a - 0xE000ED18)
             if n < NUM_EXC:
                 self.prio[n] = value & 0xF0
             return

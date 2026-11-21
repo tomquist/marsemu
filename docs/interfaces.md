@@ -1,7 +1,7 @@
 # Interfaces
 
 How to reach the emulated device from other software. The whole-device
-commands (`venus3`, `venusd`, `venusa`, `jupiter`, `b2500`) and `run` take
+commands (`venus3`, `venusd`, `venusa`, `venusmini`, `jupiter`, `b2500`) and `run` take
 most of these options; `marsemu COMMAND --help` lists them.
 
 ## MQTT broker (hm2mqtt, hame-relay, mosquitto)

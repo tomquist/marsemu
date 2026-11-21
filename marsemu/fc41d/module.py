@@ -113,6 +113,10 @@ class Fc41dConfig:
     #: other, as they would through a broker; back to back on the UART the
     #: firmwares keep only the first
     mqtt_recv_gap_ms: float = 200.0
+    #: a URC waits until the reply to a command has left the UART, plus this
+    #: gap, as on a real module (URCs are held while a command executes);
+    #: glued to a reply, the firmwares parse the reply and drop the URC
+    urc_gap_ms: float = 20.0
     #: delay of the +QHTTPGET/+QHTTPPOST result after OK (a network round trip)
     http_ms: float = 300.0
     #: "ready" banner after power-on / AT+QRST
@@ -156,6 +160,8 @@ class Socket:
     mode: int
     conn: object = None
     rxbuf: bytearray = field(default_factory=bytearray)
+    #: a UDP service socket in buffer access mode keeps whole datagrams with their sender
+    datagrams: list = field(default_factory=list)
     rx_total: int = 0
     tx_total: int = 0
 
@@ -259,6 +265,10 @@ class Fc41d(UartDevice):
         if self.uart is None:
             return
         d = self.cfg.reply_ms if delay_ms is None else delay_ms
+        now_ms = self.m.clock.seconds * 1000.0
+        # when this output has left the UART: a held URC waits for it (send_after_reply)
+        self._out_end_ms = (max(getattr(self, "_out_end_ms", 0.0), now_ms + max(d, 0.0))
+                            + len(data) * self._byte_ms())
         if self.keep_transcript:
             self.transcript.append((self.m.clock.seconds, "<", bytes(data)))
 
@@ -271,6 +281,26 @@ class Fc41d(UartDevice):
             go()
         else:
             self.m.clock.after_ms(d, go, "fc41d-tx")
+
+    def _byte_ms(self) -> float:
+        bc = getattr(self.uart, "byte_cycles", None)
+        return bc() * 1000.0 / self.m.clock.hz if bc else 10_000 / 115200
+
+    def send_after_reply(self, data: bytes, delay_ms: float) -> None:
+        """Send an unsolicited result after ``delay_ms``, but not before the
+        output already queued (a command's reply) has left the UART plus
+        ``urc_gap_ms``."""
+        epoch = self.epoch
+
+        def go():
+            if epoch != self.epoch:
+                return
+            wait = getattr(self, "_out_end_ms", 0.0) + self.cfg.urc_gap_ms - self.m.clock.seconds * 1000.0
+            if wait > 0:
+                self.m.clock.after_ms(wait, go, "fc41d-urc")
+            else:
+                self.send(data, 0)
+        self.m.clock.after_ms(max(delay_ms, 0.0), go, "fc41d-urc")
 
     def line(self, text: str, delay_ms: Optional[float] = None) -> None:
         atlog.debug("<< %s", text)
@@ -975,8 +1005,8 @@ class Fc41d(UartDevice):
             if any(topic_matches(p, topic) for p in s.subs):
                 s.msgid = (s.msgid + 1) % 65536
                 txt = payload.decode("latin1")
-                self.send(f'\r\n+QMTRECV: {s.idx},{s.msgid},"{topic}",{len(payload)},"{txt}"\r\n'.encode("latin1"),
-                          at_ms - now_ms + self.cfg.reply_ms)
+                self.send_after_reply(f'\r\n+QMTRECV: {s.idx},{s.msgid},"{topic}",{len(payload)},"{txt}"\r\n'.encode("latin1"),
+                                      at_ms - now_ms + self.cfg.reply_ms)
                 at_ms += self.cfg.mqtt_recv_gap_ms
                 delivered = True
         if delivered:
@@ -1114,6 +1144,15 @@ class Fc41d(UartDevice):
             self.line(f"+QIRD: {s.rx_total},{s.rx_total - len(s.rxbuf)},{len(s.rxbuf)}")
             self.ok()
             return
+        if s.kind == "UDP SERVICE" and s.datagrams:
+            # one datagram per read, with the address it came from (FC41D AT
+            # manual: +QIRD: <len>,<remote IP>,<remote port> for UDP service)
+            data, addr = s.datagrams.pop(0)
+            data = data[:n]
+            del s.rxbuf[:len(data)]
+            head = f'+QIRD: {len(data)},"{addr[0]}",{addr[1]}' if addr else f"+QIRD: {len(data)}"
+            self.send(f"\r\n{head}\r\n".encode() + data + b"\r\nOK\r\n")
+            return
         data = bytes(s.rxbuf[:n])
         del s.rxbuf[:n]
         self.send(f"\r\n+QIRD: {len(data)}\r\n".encode() + data + b"\r\nOK\r\n")
@@ -1139,6 +1178,8 @@ class Fc41d(UartDevice):
             self.send(data)
         else:
             s.rxbuf.extend(data)
+            if s.kind == "UDP SERVICE":
+                s.datagrams.append((bytes(data), addr))
             self.urc(f'+QIURC: "recv",{sid}')
 
     def socket_closed(self, sid: int) -> None:

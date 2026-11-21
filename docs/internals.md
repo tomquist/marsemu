@@ -9,8 +9,8 @@ from the firmware's side.
 Unicorn provides QEMU's Cortex-M4 core but none of the system devices, so the
 NVIC/SCB/SysTick/DWT/ITM live in `core/nvic.py` and exception entry and return
 in `core/machine.py`: basic and FPU frames, MSP/PSP, EXC_RETURN, tail-chaining,
-priorities with PRIGROUP/BASEPRI/PRIMASK, SVC, faults. FreeRTOS, CMSIS-RTOS2
-and bare-metal loops run unmodified. Details that matter:
+priorities with PRIGROUP/BASEPRI/PRIMASK, SVC, faults. FreeRTOS, CMSIS-RTOS2,
+uC/OS-III (Venus E Mini) and bare-metal loops run unmodified. Details that matter:
 
 * **Preemption is immediate.** `PENDSVSET` or unmasking BASEPRI/PRIMASK enters
   the pending handler before the next instruction, or FreeRTOS corrupts its
@@ -19,7 +19,7 @@ and bare-metal loops run unmodified. Details that matter:
 * **Virtual time is exact.** Time is executed instructions × CPI (2 by default,
   1 on the Venus E 3.0/A/D control, as on its cached flash). `core/ucount.py`
   finds Unicorn's instruction counter with a self-calibrating probe. WFI and the
-  FreeRTOS idle loop (`analysis/idle.py`) fast-forward to the next event, which
+  FreeRTOS or uC/OS-III idle loop (`analysis/idle.py`) fast-forward to the next event, which
   makes mostly idle firmware 3–6× faster. So do delay loops that only reload
   the watchdog while they wait for a tick counter in RAM (the B2500's
   `delay_ms()`): such a loop can only end after an interrupt, and a watchdog
@@ -34,7 +34,9 @@ and bare-metal loops run unmodified. Details that matter:
 Behavioural models (`periph/n32g45x.py`, `periph/stm32.py`, `periph/hrtim.py`)
 implement what firmware observes: ready flags, level-triggered interrupts, UART
 byte timing with IDLE detection and DMA, DMA routed by peripheral address,
-timers with input capture, timer- and HRTIM-triggered ADC sequences, I2C state
+timers with input capture (on the N32G45x counting at their APB clock, doubled
+when the APB is divided, as on the chip; the UARTs' baud rates follow the same
+APB clocks), timer- and HRTIM-triggered ADC sequences, I2C state
 machines with pluggable slaves (a transfer costs its bus time), CAN/FDCAN,
 CORDIC, flash with persistence, IWDG resets, an RTC on virtual time. Register
 names come from the vendor SVD files (`data/*.json`) and show up in traces.
@@ -54,7 +56,9 @@ sockets and Hame's `AT+HMIOPEN`.
 Two details only show up after minutes of running. The Hame module answers
 `AT+QGETWIFISTATE` as `ssid=…,bssid=…,rssi=…,channel=…`, not in the manual's
 positional form; and the `+QHTTPGET`/`+QHTTPPOST` result comes a network round
-trip after `OK`. Either one wrong, and a B2500 loses its CT meter. The offline
+trip after `OK`. Either one wrong, and a B2500 loses its CT meter. An incoming
+MQTT message (`+QMTRECV`) waits until a command's reply has left the UART, as
+on the module: glued to the reply, the firmwares drop it. The offline
 cloud answers what [Marsrelay](https://github.com/tomquist/marsrelay) answers.
 
 The CT00x meters do not upload certificates: theirs are loaded into the module

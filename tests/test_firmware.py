@@ -30,6 +30,7 @@ if EXTRA:
         ("venus3-VNSE3-151", f"{EXTRA}/**/VNSE3-0/Control/151/*.bin", 70),
         ("ct002-HME4-124", f"{EXTRA}/**/HME-4/124/*.bin", 90),
         ("jupiter-JPLS-143", f"{EXTRA}/**/JPLS-8H/143/*.bin", 70),
+        ("venus-mini-VNSEMINI-309", f"{EXTRA}/**/VNSEMINI-0/Control/309/*.bin", 40),
     ]
 
 
@@ -48,6 +49,126 @@ def test_reaches_mqtt(name, pattern, budget):
     assert emu.machine.reset_count == 1, "unexpected resets"
     topic = subs[0]
     assert "/App/" in topic and topic.endswith("/ctrl")
+
+
+@pytest.mark.firmware
+def test_venus_mini_answers_a_two_digit_command():
+    """The Venus E Mini control (an OTA image with a header, uC/OS-III) reports
+    its state on ``cd=01``; it ignores ``cd=1``, which the other devices take."""
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/VNSEMINI-0/Control/309/*.bin", recursive=True))
+    if not files:
+        pytest.skip("Venus E Mini control 309 not in the archive")
+    emu = Emulator(files[0])
+    assert emu.base == 0x08008000 and emu.idle_loop
+    subs, pubs = [], []
+    emu.on("mqtt_subscribe", subs.append)
+    emu.on("mqtt_publish", lambda t, p: pubs.append((t, bytes(p))))
+    emu.run(seconds=40, until=lambda: bool(subs))
+    assert subs == ["marstek_energy/VNSEMINI-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl"]
+    emu.run(10)
+    pubs.clear()
+    emu.mqtt_inject(subs[0], "cd=1")
+    emu.run(3)
+    assert not pubs
+    emu.mqtt_inject(subs[0], "cd=01")
+    emu.run(3)
+    state = [p for t, p in pubs if "/device/" in t]
+    assert state and b"pmu=309," in state[0]
+    assert emu.machine.reset_count == 1
+
+
+def _mini_image():
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/VNSEMINI-0/Control/309/*.bin", recursive=True))
+    if not files:
+        pytest.skip("Venus E Mini control 309 not in the archive")
+    return files[0]
+
+
+@pytest.mark.firmware
+def test_venus_mini_finds_its_phase_and_regulates_the_grid():
+    """Venus E Mini, whole device: the app's setup (self-consumption, the CT002
+    as ct_t=3, phase detection), the control's 800 W probe finds phase A, then
+    the inverter covers the house load and charges from an export."""
+    from marsemu.plant.battery import LfpPack
+    from marsemu.plant.venus3_cli import House, configure_self_consumption, connect_house
+    from marsemu.plant.venusmini import VenusMini
+    v = VenusMini(_mini_image(), pack=LfpPack(cells_n=2, capacity_ah=314, soc=0.6))
+    house = House({"A": 600.0})
+    meter = connect_house(v, house)
+    configure_self_consumption(v)
+    try:
+        probed = []
+        v.inverter.on_reference.append(lambda want, ref: v.inverter.mode in (1, 2) and probed.append(ref))
+        v.run(120, until=lambda: probed and v.inverter.mode == 0 and v.ac_power > 500 and abs(house.grid()["A"]) < 25)
+        assert probed, "no phase-detection probe (mode 1/2) seen"
+        assert meter.polls > 0 and v.inverter.meter_ok
+        assert v.inverter.mode == 0, "should regulate on the meter after its phase detection"
+        assert abs(house.grid()["A"]) < 25, f"grid {house.grid()} battery {v.ac_power:.0f} W"
+        house.loads["A"] = -300.0
+        v.run(90, until=lambda: v.ac_power < -250 and abs(house.grid()["A"]) < 25)
+        assert v.ac_power < -250 and abs(house.grid()["A"]) < 25, f"grid {house.grid()} battery {v.ac_power:.0f} W"
+        assert v.pack.current_a > 30 and v.dcdc.on
+        assert v.control.machine.reset_count == 1
+    finally:
+        v.close()
+
+
+@pytest.mark.firmware
+def test_venus_mini_stops_at_its_depth_of_discharge_and_charges_when_empty():
+    """The control's BMS: discharging, it clears the DC/DC's discharge
+    permission (0x90 word 1) below its depth of discharge (10 % with do=90)
+    and the house falls back on the grid; below 5 % it charges from the grid
+    with a fixed 1000 W."""
+    from marsemu.plant.battery import LfpPack
+    from marsemu.plant.venus3_cli import House, configure_self_consumption, connect_house
+    from marsemu.plant.venusmini import VenusMini
+    v = VenusMini(_mini_image(), pack=LfpPack(cells_n=2, capacity_ah=314, soc=0.103))
+    house = House({"A": 600.0})
+    connect_house(v, house)
+    configure_self_consumption(v)
+    try:
+        v.run(90, until=lambda: v.ac_power > 500)
+        assert v.ac_power > 500, "should cover the load above its depth of discharge"
+        v.run(240, until=lambda: not v.dcdc.discharge_allowed)
+        assert not v.dcdc.discharge_allowed and v.pack.soc > 0.095
+        v.run(10)
+        assert abs(v.ac_power) < 20 and house.grid()["A"] > 550
+    finally:
+        v.close()
+    v = VenusMini(_mini_image(), pack=LfpPack(cells_n=2, capacity_ah=314, soc=0.04))
+    connect_house(v, House({"A": 600.0}))
+    try:
+        v.run(60, until=lambda: v.ac_power < -900)
+        assert v.inverter.mode == 1 and v.inverter.mode_power == 1000 and v.ac_power < -900
+    finally:
+        v.close()
+
+
+@pytest.mark.firmware
+def test_venus_mini_tapers_and_ends_a_charge():
+    """Near full the control lowers the DC/DC's charge limit (0x90 word 3)
+    while a cell is above 3.45 V, then switches the converter off."""
+    from marsemu.plant.battery import LfpPack
+    from marsemu.plant.venus3_cli import House, configure_self_consumption, connect_house
+    from marsemu.plant.venusmini import VenusMini
+    v = VenusMini(_mini_image(), pack=LfpPack(cells_n=2, capacity_ah=314, soc=0.98))
+    connect_house(v, House({"A": -900.0}))
+    configure_self_consumption(v)
+    limits = []
+    try:
+        v.run(90, until=lambda: v.ac_power < -800)
+        assert v.ac_power < -800, "should charge from the export"
+        v.run(600, until=lambda: (limits.append(v.dcdc.values[0]) or True) and not v.dcdc.on)
+        assert not v.dcdc.on, "should end the charge"
+        assert min(limits) <= 400, "should taper the charge power first"
+        v.run(5)
+        assert v.pack.soc > 0.99 and abs(v.ac_power) < 20, f"soc {v.pack.soc:.4f}, ac {v.ac_power:.0f} W"
+    finally:
+        v.close()
 
 
 def _venus3_images():
@@ -787,6 +908,30 @@ def test_ui_session_b2500_steers_and_logs_every_bus():
     assert {"USART1", "RF", "MQTT", "I2C2", "UART5"} <= {e["ch"] for e in r["events"]}
     assert snap["mcu"]["regs"]["TIM8_CCR3"] and snap["mcu"]["irqs"]
     assert len(r["history"]) > 100
+
+
+@pytest.mark.firmware
+def test_ui_session_venus_mini_steers_and_logs_its_uarts():
+    """The dashboard's session around a Venus E Mini: the setup, the phase
+    detection and the regulation run, and both internal UARTs show up."""
+    import time
+    from marsemu.ui.session import VenusMiniSession
+    s = VenusMiniSession(_mini_image(), load=500, soc=60, speed=0, poll_s=10)
+    s.start()
+    try:
+        deadline = time.time() + 600
+        while s.read()["snapshot"]["t"] < 90 and time.time() < deadline:
+            time.sleep(0.5)
+        r = s.read()
+    finally:
+        s.stop()
+    snap = r["snapshot"]
+    assert snap["error"] is None and snap["model"] == "Venus E Mini"
+    assert snap["version"] == "309" and snap["device_type"] == "VNSEMINI-0"
+    assert abs(snap["grid"]) < 60 and snap["ac"] > 400, (snap["grid"], snap["ac"])
+    assert snap["bms"]["soc"] is not None and snap["inverter"]["meter_ok"]
+    assert {"UART4", "UART5", "USART2", "RF", "MQTT"} <= {e["ch"] for e in r["events"]}
+    assert snap["can"]["by_dir"]["control→dcdc"] > 50
 
 
 UI_SESSIONS = [

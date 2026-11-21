@@ -8,6 +8,7 @@ What marsemu runs for each device, and what it models around the real firmware.
 | Venus D | `venusd CONTROL BMS` | control, BMS (one per pack) | inverter, MPPT, packs |
 | Venus A | `venusa CONTROL BMS` | control, BMS (one per pack) | inverter with MPPT, packs |
 | Venus C/E | Python only (`VenusCE`) | control, BMS | power stage at the control's pins |
+| Venus E Mini | `venusmini CONTROL` | control (with the battery management) | inverter, DC/DC, two-cell pack |
 | Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
 | B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |
 | B2500 v1 (HMB) | `b2500 FIRMWARE` | the one MCU | front end, PV, switched outputs |
@@ -125,6 +126,81 @@ its phase with its own 2 kW charge or discharge test and covers the house
 inductance, bus capacitance and LLC ratio are estimates. It runs at about a
 sixth of real time.
 
+## Venus E Mini
+
+```mermaid
+flowchart LR
+    ctl["control MCU (PMU), N32G45x<br/>real firmware: FC41D, CT poll, phase<br/>detection, modes, battery management"]
+    inv["inverter board model (Python)<br/>Micro 270 UART protocol and its<br/>self-consumption regulator"]
+    dcdc["DC/DC board model (Python)<br/>cell voltages, current, temperatures,<br/>on/off, charge and discharge permission and limits"]
+    pack["LFP pack model<br/>2 cells, 314 Ah (2 kWh)"]
+    ctl -->|UART4: 0x72 mode, 0x21 meter reading| inv
+    inv -->|0x01 status, 0x02 grid and AC power| ctl
+    ctl -->|UART5: 0x90 on/off, permissions, limits| dcdc
+    dcdc -->|0x80 cells, current, temperatures| ctl
+    dcdc --- pack
+```
+
+The Mini (VNSEMINI-0) is built differently from the other Venus models: no
+CAN bus and no BMS MCU. The control board ("PMU", an N32G45x running
+uC/OS-III) talks to an inverter board on UART4 and to a DC/DC board on UART5,
+and runs the battery management itself: SOC (an estimate from the cell
+voltages at start, then coulomb counting), capacity, protections. The battery
+is two LFP cells of 314 Ah in series (6.4 V, 2009 Wh: the firmware's rated
+capacity); the DC/DC boosts it to the inverter.
+
+* **Control** (`venus-mini` profile, Control 309): the real firmware.
+* **Inverter board** (Micro 270): a Python model. Its protocol was taken
+  from the control's request builders and reply handlers, its regulator from
+  the Micro 270 image. The control forwards the meter reading of the
+  battery's phase (`0x21`) and the inverter regulates on it: the discharge
+  power moves by half the grid power per reading, up to the discharge limit
+  (800 W, or 1250 W with `cd=57`'s first value; the app calls it 1500 W), and
+  the charge power up to 1250 W (800 W with its second value). For the phase
+  detection, UPS mode, schedules and the forced charge below 5 % SOC (1000 W
+  from the grid), the control commands a fixed charge or discharge power
+  instead (`0x72`). Micro 270 itself boots in the emulator (`aux-g4`), at
+  about 1/40 of real time.
+* **DC/DC board**: a Python model of what the control reads (cell voltages,
+  pack current from a coarse and a fine sensor, cell and board
+  temperatures) and of what it commands (`0x90`): the converter on or off,
+  whether it may discharge (cleared below the depth of discharge, 10 % with
+  the default 90 %) or charge, and the charge and discharge power limits. At
+  the end of a charge the control lowers the charge limit from 1500 W in
+  30 W steps while a cell is above 3.45 V, down to 300 W, then switches the
+  converter off. Its firmware is not in the archives.
+* **Pack**: the control's SOC tables end at a full cell's resting 3.38 V, so
+  the model's cells add the steep rise of an LFP cell at the end of charge
+  while charging; it is what takes them past the control's 3.45 V.
+
+The whole device runs at about 1.2× real time.
+
+```bash
+marsemu venusmini VNSEMINI-0/Control/309/*.bin --load 600 --soc 60
+```
+
+```text
+[    90.0] ac   596.0 W  ref   596.0 W  grid     4.0 W  soc  59.5% (bms 59.8%)  6.54 V   -95.4 A  limits [800, -1250]  polls 30
+[   300.0] ac   596.0 W  ref   596.0 W  grid     4.0 W  soc  57.8% (bms 58.0%)  6.52 V   -95.7 A  limits [800, -1250]  polls 123
+```
+
+The setup sends what the app does: `cd=02,md=0` (self-consumption),
+`cd=18,ct_t=3,mac=…` (a CT002; the Mini's key is `ct_t`, not `meter`) and
+`cd=58,dt=1`, the phase detection. Without a known phase the Mini does not
+regulate: it probes with 800 W (discharging above 50 % SOC, else charging),
+finds the phase whose reading moved, and from then on regulates on it. It
+answers two-digit commands only (`cd=01`, not `cd=1`). Its status line's
+`bms` SOC is the firmware's own, from its `cd=01` reports. The firmware starts
+it from the cells' resting voltage, using its tables for 0, 20 and 30 °C; the
+model's two cells take those same tables as their open-circuit voltage, so the
+firmware's starting SOC matches `--soc` (to about 1 %, LFP's curve is flat).
+
+The Mini's OTA images carry a 32-byte header in front of the application
+(`VNSEMINI-0_PMU_V135_186556_42_FF`: device type, board, version in hex,
+payload size, checksum). marsemu strips it the way the bootloader does and
+places the application at its link address, 0x08008000; `marsemu info` shows
+the header's fields.
+
 ## Jupiter C/E and C Plus
 
 The inverter and MPPT firmware is not available, so they are models built
@@ -204,9 +280,10 @@ started the way the bootloader would; full images run the bootloader first.
 | `venus` | Venus C/E (HMG) control | STM32G474 | LPUART1 | reaches MQTT (~40 s for V153+, ~80–95 s before); whole device V154 |
 | `venus3` | Venus E 3.0 / A / D control | N32G457 | UART6 | reaches MQTT; whole device |
 | `jupiter` | Jupiter C/E (HMM/HMN), C Plus (JPLS-8H) | N32G45x | USART1 | reaches MQTT; whole device |
+| `venus-mini` | Venus E Mini (VNSEMINI) control, 309 | N32G45x | USART2 | reaches MQTT; whole device |
 | `ct00x` | CT002/CT003 (HME) | STM32F0-class | USART1 | reaches MQTT (the module claims the factory certificates) |
 | `aux` | BMS and other MCUs without an FC41D (N32) | – | – | boot; the Venus BMSes run fully with their front-end models |
-| `aux-g4` | STM32G474 inverter boards (Venus D/E 3.0 "micro") | – | – | boot; answer the control's CAN commands |
+| `aux-g4` | STM32G474 inverter boards (Venus D/E 3.0/E Mini "micro") | – | – | boot; the Venus D/E 3.0 ones answer the control's CAN commands; Micro 270 (Mini) runs at about 1/40 of real time |
 
 Per-image results are in [`STATUS.md`](STATUS.md), generated by
 `tools/survey.py`.
@@ -220,8 +297,10 @@ Per-image results are in [`STATUS.md`](STATUS.md), generated by
 | Battery front ends (KA495XX, SH36735, SH367309) | protocols from RE notes and disassembly, scaling measured against the firmware | high |
 | Venus inverter CAN protocols | captured from Micro v119/v116 in the emulator, RE notes | high |
 | Venus D MPPT, Venus A inverter + MPPT, Jupiter inverter/MPPT/BMS (no firmware) | the control firmware's parsers and senders | medium–high |
+| Venus E Mini inverter: protocol, regulator, modes, limits | the control's request builders and reply handlers; the regulator and the limits from the Micro 270 image | high (protocol, regulator, limits); the fault bits in `e1`..`e6` are not mapped |
+| Venus E Mini DC/DC (no firmware) | the control's reply handler and battery management, including what it commands (on/off, charge and discharge permission and limits; units checked by their use) | medium–high |
 | Venus C/E power stage | the control firmware's ADC scaling and PWM mapping; component values estimated | medium |
 | B2500 ADC/PWM/DAC/GPIO mapping, settings record, SOC | disassembly, checked against the firmware's `cd=1` reports | high |
 | Power dynamics (grid-connect delay, slew, filters, losses, converter dynamics) | estimates | **calibrate against a real device** |
 | Microinverter MPP tracking on the B2500 outputs | generic sweep + perturb-and-observe | medium |
-| Cells (LFP OCV curve, resistance, thermal) | generic LFP data | medium |
+| Cells (LFP OCV curve, resistance, thermal) | generic LFP data; the Venus E Mini's OCV from its control's SOC tables, plus an estimated rise at the end of charge | medium |

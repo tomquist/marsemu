@@ -13,7 +13,7 @@ from .fc41d.net import Network
 from .periph import n32g45x
 from .periph.n32g45x import UartDevice
 from .analysis.idle import find_idle_loop, find_watchdog_waits
-from .profiles import PROFILES, Profile, detect, load_base
+from .profiles import PROFILES, Profile, detect, load_base, strip_header
 
 log = logging.getLogger("emu")
 
@@ -84,6 +84,8 @@ class Emulator:
         else:
             self.firmware_path = ""
             image = bytes(firmware)
+        #: the application as flashed (an OTA header in front of it removed)
+        image = strip_header(image)
         self.image = image
         self.profile: Profile = PROFILES[profile] if profile else detect(image, self.firmware_path)
         p = self.profile

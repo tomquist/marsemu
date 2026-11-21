@@ -26,7 +26,7 @@ data from the running firmware:
   B2500, four on the Venus D, Venus A and Jupiter), ambient temperature,
   scenarios (load step; on the B2500 a passing cloud and solar surplus, on the
   Venus a house that exports), faults (Wi‑Fi down,
-  CT002 offline, pack over-temperature), a status poll (`cd=1`), pause, step
+  CT002 offline, pack over-temperature), a status poll (`cd=1`; `cd=01` on the Venus E Mini), pause, step
   and a speed limit from 0.1× to as fast as the computer can.
 
 Every device marsemu models. Pick the image on the start screen; devices
@@ -38,6 +38,7 @@ with a BMS image of their own take it too.
 | **Venus E 3.0** | control (`venus3`, VNSE3) + BMS | control and BMS firmware (the BMS in its own process), the KA495XX and 16 cells, the inverter board model, EEPROM, RS485 |
 | **Venus D** | control (VNSD) + BMS | as the E 3.0, plus the MPPT model with four PV strings; stacked packs (`packs` on the start screen) |
 | **Venus A** | control (VNSA) + BMS | the SH36735 front end and 13 cells, the inverter with its four PV inputs; stacked packs |
+| **Venus E Mini** | control (`venus-mini`, VNSEMINI) | the control firmware with its battery management, the inverter and DC/DC models on UART4/UART5, two cells |
 | **Jupiter C/E, C Plus** | control (`jupiter`), BMS optional | the inverter and MPPT models; the C Plus's real BMS firmware with its image, else the BMS model (Pylontech-style frames) |
 | **Venus C/E** | control (`venus`, HMG) + BMS | the control MCU runs the power stage itself: the LLC, the DC bus, the bridge and the grid relay it drives, the BMS firmware on CAN. It runs at about a sixth of real time |
 | **CT002 / CT003** | one (`ct00x`) | the meter's firmware answering virtual batteries that poll it over UDP (how many, and what power they report, are controls). The grid it measures is the house load, spread over the three phases, minus what each battery delivers: on a CT002 through a model of its metering chip, on a CT003 (a P1 reader) as the utility meter's telegrams on its P1 port |
@@ -107,6 +108,6 @@ prefix (Home Assistant's ingress).
 | `POST api/stop` | Stop the device |
 
 From Python, the classes in `marsemu.ui.session` (`B2500Session`,
-`VenusE3Session`, `VenusDSession`, `VenusASession`, `JupiterSession`,
+`VenusE3Session`, `VenusDSession`, `VenusASession`, `VenusMiniSession`, `JupiterSession`,
 `VenusCESession`, `CtSession`) are the same devices without the web server: `command()` takes the same commands and `read()` returns the
 same snapshot.

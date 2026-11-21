@@ -1,4 +1,5 @@
-"""The B2500's extension-pack bus (UART5, 19200 baud, all hardware versions).
+"""The B2500's extension-pack bus (UART5, 9600 baud, all hardware versions: the
+firmware's divider at its 36 MHz APB1 clock).
 
 About once a second the main unit polls extension packs 1 and 2 and
 broadcasts the status of its own battery.  Frames::

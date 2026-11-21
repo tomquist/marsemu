@@ -177,7 +177,7 @@ class DeviceSession:
 
         def pub(topic: str, payload) -> None:
             text = payload.decode("latin1", "replace") if isinstance(payload, (bytes, bytearray)) else str(payload)
-            m = re.search(r"(?:^|,)vv=(\d+)", text)
+            m = re.search(r"(?:^|,)(?:vv|pmu)=(\d+)", text)
             if m and not self.version:
                 self.version = m.group(1)
             self._log("MQTT", "FC41D→broker", f"{topic}  {text[:400]}")
@@ -215,6 +215,11 @@ class DeviceSession:
         meter = net.udp_handler
 
         def udp(sock, data: bytes, dest) -> None:
+            from ..plant.venus3_cli import CT_UDP_PORT
+            if dest[1] != CT_UDP_PORT:
+                # not for the meter (the Venus E Mini tells other Minis its power on 60606)
+                self._log("RF", "FC41D→LAN", f"UDP broadcast to {dest[0]}:{dest[1]}  {data[:60].decode('latin1', 'replace')}")
+                return
             self.ct["polls"] += 1
             self._ct_last_poll = self.dev.time
             if self.faults["ct"] or self.faults["wifi"]:
@@ -919,6 +924,96 @@ class JupiterSession(VenusBoardSession):
                 "can": self._can_snapshot()}
 
 
+# ======================================================================== Venus E Mini
+#: what the control's UART commands are, for the console
+MINI_COMMANDS = {
+    0x81: {0x01: "status", 0x02: "realtime", 0x21: "meter power", 0x40: "read params 0x40", 0x41: "read params 0x41",
+           0x43: "read params 0x43", 0x44: "read params 0x44", 0x45: "read params 0x45", 0x46: "read params 0x46",
+           0x60: "write params 0x40", 0x61: "write params 0x41", 0x63: "write params 0x43", 0x64: "write params 0x44",
+           0x65: "write params 0x45", 0x66: "write params 0x46", 0x70: "settings 0x70", 0x71: "settings 0x71",
+           0x72: "mode"},
+    0x82: {0x80: "realtime", 0x81: "read params", 0x90: "switches", 0x91: "write params"},
+}
+
+
+class VenusMiniSession(DeviceSession):
+    """A Venus E Mini: the control firmware (with the battery management in
+    it), the inverter and DC/DC models on the control's UART4 and UART5, and
+    the two-cell pack."""
+
+    MODEL = "Venus E Mini"
+    CHANNELS = ("FW", "UART4", "UART5", "USART2", "MQTT", "RF", "BLE", "EVT", "ALARM")
+
+    def __init__(self, firmware: str, *, device_type: Optional[str] = None, **kw):
+        for k in ("pv", "packs", "bms", "extension_packs"):
+            kw.pop(k, None)
+        self.links = {"frames": 0, "by_dir": collections.Counter()}
+        self._link_last: Dict[str, float] = {}
+        super().__init__(firmware, device_type=device_type, **kw)
+        self.device_type = device_type or "VNSEMINI-0"
+
+    def _build(self, control_kwargs: dict, soc: float, **_):
+        from ..plant.battery import LfpPack
+        from ..plant.venusmini import CAPACITY_AH, CELLS, VenusMini, mini_stage
+        pack = LfpPack(cells_n=CELLS, capacity_ah=CAPACITY_AH, soc=soc / 100.0, temp_c=self.ambient_c,
+                       ambient_c=self.ambient_c, spread=0.01)
+        self.stage = mini_stage(self.ambient_c)
+        return VenusMini(self.firmware, pack=pack, stage=self.stage, control_kwargs=control_kwargs)
+
+    def _hook_device(self) -> None:
+        import struct as _struct
+        for board, uart in ((self.dev.inverter, "UART4"), (self.dev.dcdc, "UART5")):
+            orig = board.handle
+
+            def handle(cmd, payload, board=board, uart=uart, orig=orig):
+                reply = orig(cmd, payload)
+                name = MINI_COMMANDS.get(board.addr, {}).get(cmd, f"0x{cmd:02x}")
+                self.links["frames"] += 1 + (reply is not None)
+                self.links["by_dir"][f"control→{board.name}"] += 1
+                if reply is not None:
+                    self.links["by_dir"][f"{board.name}→control"] += 1
+                key = f"{board.name}:{cmd}"
+                if self.dev.time - self._link_last.get(key, -1e9) >= 2.0:
+                    self._link_last[key] = self.dev.time
+                    text = f"0x{cmd:02x} {name}  {payload[:24].hex()}"
+                    if cmd == 0x72:
+                        mode, w = _struct.unpack(">HH", payload[:4].ljust(4, b"\0"))
+                        what = ("regulate on the meter", "charge", "discharge")[mode] if mode < 3 else "?"
+                        text += f"  (mode {mode}: {what} {w} W)"
+                    self._log(uart, f"control→{board.name}", text)
+                return reply
+            board.handle = handle
+
+    def _app_poll(self, now: float) -> None:
+        # the Mini answers the two-digit command only
+        if self.sub_topic and not self.faults["wifi"]:
+            self._log("MQTT", "broker→FC41D", f"{self.sub_topic}  cd=01  (status poll, as the app does)")
+            self.emu.mqtt_inject(self.sub_topic, "cd=01")
+
+    def _set_ambient(self, c: float) -> None:
+        self.stage.ambient_c = c
+        self.dev.dcdc.board_temp_c = c
+
+    def _device_snapshot(self) -> dict:
+        inv, dc, rep = self.dev.inverter, self.dev.dcdc, self.dev.reported
+        p = self.dev.pack
+        bms = {"soc": rep.get("soc"), "v": round(p.voltage, 3), "a": round(p.current_a, 2),
+               "charge_v": None, "charge_a": None, "discharge_a": None, "flags": 0, "protect": 0,
+               "seen": round(self.dev.time - rep["t"], 1) if "t" in rep else None, "image": None,
+               "mos": {"charge": dc.on, "discharge": dc.on}, "real": True, "process": "control firmware",
+               "battery_w": rep.get("battery_w")}
+        inverter = {"reference": round(inv.reference, 1), "ac": round(inv.ac_power, 1), "dc": round(inv.dc_power, 1),
+                    "connected": bool(inv.connected), "limit_discharge": round(inv.feed_in_limit()),
+                    "limit_charge": -round(inv.charge_limit()), "charge_limit_w": round(inv.charge_limit()),
+                    "discharge_limit_w": round(inv.feed_in_limit()), "mode": inv.mode, "mode_w": inv.mode_power,
+                    "grid_import": inv.grid_import, "meter_ok": inv.meter_ok,
+                    "regulating": "charge" if inv.charging_state else "discharge",
+                    "temp_llc": round(dc.board_temp_c, 1), "temp_inv": round(inv.temp_c, 1),
+                    "errors": [0, 0, 0], "version": inv.version, "dcdc_version": dc.version, "dcdc_on": dc.on}
+        return {"inverter": inverter, "bms": bms, "packs": [], "mppt": None,
+                "can": {"frames": self.links["frames"], "by_dir": dict(self.links["by_dir"])}}
+
+
 # ========================================================================== Venus C/E
 class VenusCESession(CanBoardSession):
     """A Venus C/E: the control MCU (STM32G474) runs the power stage itself;
@@ -1148,6 +1243,7 @@ class CtSession(DeviceSession):
 
 SESSION_TYPES: Dict[str, Callable[..., DeviceSession]] = {
     "b2500-v1": B2500Session, "b2500-v2": B2500Session, "b2500-v3": B2500Session, "ct00x": CtSession,
+    "venus-mini": VenusMiniSession,
 }
 #: control profile -> [(session, device types it covers)]: the control image's types tell them apart
 PAIRED_TYPES: Dict[str, list] = {
@@ -1159,6 +1255,6 @@ PAIRED_TYPES: Dict[str, list] = {
 #: sessions that run without a BMS image too
 BMS_OPTIONAL = (JupiterSession,)
 
-__all__ = ["DeviceSession", "B2500Session", "VenusE3Session", "VenusDSession", "VenusASession", "JupiterSession",
+__all__ = ["DeviceSession", "B2500Session", "VenusMiniSession", "VenusE3Session", "VenusDSession", "VenusASession", "JupiterSession",
            "VenusCESession", "CtSession", "SESSION_TYPES", "PAIRED_TYPES", "BMS_OPTIONAL", "Event",
            "decode_venus_can"]

@@ -6,8 +6,13 @@ of the work for a mostly idle firmware, so the emulator fast-forwards to the
 next interrupt when execution reaches the idle loop, exactly as it does for WFI.
 
 The idle task is found from ``vTaskStartScheduler``: the code that loads the
-task name ``"IDLE"`` also loads the entry point ``prvIdleTask``; its first
-backward loop is the idle loop.  The machine only sleeps there after a whole
+task name ``"IDLE"`` also loads the entry point ``prvIdleTask`` (into r0, the
+first argument of ``xTaskCreate``); its first backward loop is the idle loop.
+uC/OS-III (the Venus E Mini) is found the same way from ``OS_IdleTaskInit``,
+which passes the name ``"uC/OS-III Idle Task"`` and ``OS_IdleTask`` (in r2,
+the third argument of ``OSTaskCreate``).  Its loop only counts iterations
+(``OSIdleTaskCtr``, ``OSStatTaskCtr``, used for the CPU-usage statistic) and
+calls the idle hook.  The machine only sleeps there after a whole
 iteration ran without an exception (no yield to another idle-priority task, no
 interrupt), so skipping further iterations until the next interrupt is
 indistinguishable from running them.
@@ -39,6 +44,10 @@ def _literal_refs(image: bytes, base: int, value: int):
         i = image.find(pat, i + 1)
 
 
+#: (idle task name, register its entry point is passed in) per RTOS
+IDLE_TASKS = ((b"IDLE\x00", "r0"), (b"uC/OS-III Idle Task\x00", "r2"))
+
+
 def find_idle_loop(image: bytes, base: int) -> Optional[int]:
     """Return the address of the idle loop's head, or None."""
     if capstone is None:
@@ -46,16 +55,17 @@ def find_idle_loop(image: bytes, base: int) -> Optional[int]:
     md = _thumb()
     md.skipdata = True
     end = base + len(image)
-    names = []
-    s = image.find(b"IDLE\x00")
-    while s >= 0:
-        names.append(base + s)
-        s = image.find(b"IDLE\x00", s + 1)
-    if not names:
+    #: name address (or a literal holding it) -> register the entry point is loaded into
+    targets = {}
+    for name, reg in IDLE_TASKS:
+        s = image.find(name)
+        while s >= 0:
+            targets[base + s] = reg
+            for lit in _literal_refs(image, base, base + s):
+                targets[lit] = reg
+            s = image.find(name, s + 1)
+    if not targets:
         return None
-    targets = set(names)
-    for n in names:
-        targets.update(_literal_refs(image, base, n))
     insns = list(md.disasm(image, base))
     for k, ins in enumerate(insns):
         t = None
@@ -69,8 +79,9 @@ def find_idle_loop(image: bytes, base: int) -> Optional[int]:
                 t = None
         if t not in targets:
             continue
+        reg = targets[t] + ","
         for near in insns[max(0, k - 6): k + 6]:
-            if near.mnemonic in ("ldr", "ldr.w") and "[pc" in near.op_str and near.op_str.startswith("r0,"):
+            if near.mnemonic in ("ldr", "ldr.w") and "[pc" in near.op_str and near.op_str.startswith(reg):
                 lt = _ldr_target(near)
                 if base <= lt < end - 4:
                     v = struct.unpack_from("<I", image, lt - base)[0]

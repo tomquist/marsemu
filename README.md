@@ -120,7 +120,7 @@ marsemu ui HMJ-2/116/*.bin                  # then open http://127.0.0.1:8080/
 An X-ray view of the running device: its boards, chips and cells, the power
 flowing between them, every bus message, the registers the firmware writes,
 and controls for load, sun, faults and speed. Every device: B2500, Venus E 3.0, D, A
-and C/E, Jupiter C/E and C Plus, CT002/CT003. See
+and C/E, Venus E Mini, Jupiter C/E and C Plus, CT002/CT003. See
 [docs/ui.md](docs/ui.md).
 
 ## Quick start
@@ -176,6 +176,7 @@ To script it from Python, see [docs/library.md](docs/library.md).
 | Venus D | `venusd CONTROL BMS` | control, BMS (one per pack) | inverter, MPPT, packs |
 | Venus A | `venusa CONTROL BMS` | control, BMS (one per pack) | inverter with MPPT, packs |
 | Venus C/E | Python only (`VenusCE`) | control, BMS | power stage at the control's pins |
+| Venus E Mini | `venusmini CONTROL` | control (with the battery management) | inverter, DC/DC, two-cell pack |
 | Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
 | B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |
 | B2500 v1 (HMB) | `b2500 FIRMWARE` | the one MCU | front end, PV, switched outputs |
