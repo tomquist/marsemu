@@ -23,7 +23,7 @@ flybacks           EPWM1/2 (PV1) and EPWM3/4 (PV2), 100 kHz, interleaved
 
 Grid-connect sequence (1 ms task, state in RAM ``0x8684``): 0 checks the grid
 and clears the outputs, 1 tells 50 from 60 Hz by the ECAP period (45-55 Hz
-and its 60 Hz counterpart), 2 observes the grid (60 s on first start), 9/3
+and its 60 Hz counterpart), 2 observes the grid, 9/3
 arm the relay and close it inside the ADC interrupt as the CLA's PLL sine
 passes -0.95, 4 waits, 5 runs MPPT per input.
 
@@ -64,14 +64,18 @@ ADC_NOISE = 2
 class Flyback:
     """One PV input: array, input capacitor and a DCM flyback."""
 
-    def __init__(self, array: PvArray, epwms, c_in: float = 2.0e-3, l_mag: float = 1.5e-6,
-                 efficiency: float = 0.955, hz: float = 60e6):
+    def __init__(self, array: PvArray, epwms, c_in: float = 2.0e-3, l_mag: float = 4e-6,
+                 efficiency: float = 0.955, hz: float = 60e6, buffer_s: float = 0.0):
         self.array = array
         self.epwms = epwms
         self.c_in = c_in
         self.l_mag = l_mag
         #: ePWM time base clock (SYSCLKOUT)
         self.hz = hz
+        #: the board's intermediate stage takes the flybacks' 100 Hz power
+        #: pulsation; the string sees their demand averaged over this long
+        self.buffer_s = buffer_s
+        self.g_avg = 0.0
         self.efficiency = efficiency
         self.v = array.voc if array.isc > 0 else 0.0
         self.i = 0.0          # converter input current (switching-period average), A
@@ -96,6 +100,9 @@ class Flyback:
         if arr.isc <= 0:          # no light: no voltage either
             self.v = self.i = self.p = 0.0
             return
+        k = min(1.0, dt / self.buffer_s) if self.buffer_s > 0 else 1.0
+        self.g_avg += (g - self.g_avg) * k
+        g = self.g_avg
         # the capacitor against the array: a few explicit substeps, or the
         # equilibrium when the step is long against the time constant
         tau = self.c_in / (g + arr.isc / max(0.1 * arr.voc, 1e-3) + 1e-9)

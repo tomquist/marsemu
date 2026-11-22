@@ -294,20 +294,30 @@ see [internals](internals.md)) and models the board around them at the pins:
   its relay (GPIO21, `rel_s`) as the CLA's PLL phase passes a set point.
 * **PV**: two strings with an exponential I-V curve (`--pv`, `--voc`) on
   their input capacitors; voltage on A3/B4, current on A1/A0.
-* **Flybacks**: each input is a DCM flyback whose input current follows the
-  on-time the firmware gives EPWM1/2 and EPWM3/4, so power flows only while it
-  switches, and its MPPT finds the strings' maximum power points itself. The
-  output goes through an unfolding bridge to the grid; losses are a fixed
-  efficiency.
+* **Flybacks**: each input is a flyback whose input current follows the
+  on-time and the period the firmware gives EPWM1/2 and EPWM3/4 (it switches at
+  a variable frequency), so power flows only while it switches and the
+  firmware's own MPPT decides how much. The output goes through an unfolding
+  bridge to the grid; losses are a fixed efficiency. The magnetising
+  inductance (4 µH) and the input capacitance (2 mF) are estimates: with them
+  the firmware takes about 80 % and 50 % of what two 300 W and 250 W strings
+  offer, and its operating point swings by several volts every ~150 ms
+  instead of settling. A real device's values would fix that.
+* **ADC noise**: a few counts on every channel, as on the real board. The
+  firmware starts an input only once the string voltage reads above its
+  running minimum, which a noise-free reading never does.
 * **EEPROM**: the 24C32 on I2C (0x50) with the settings and energy counters,
   kept in `--state-dir`.
 
 ```bash
-marsemu hmi HMI-1/Control/132/*.bin --pv 400,350 -t 300
+marsemu hmi HMI-1/Control/132/*.bin --pv 300,250 -t 300
 ```
 
-The first start observes the grid for about a minute of emulated time before
-the relay closes. The whole device runs at about 0.2× real time; it needs the
+About 36 s after boot (a first start with an empty EEPROM) the relay closes
+and both inputs feed in; `cd=1` then reports the grid as 230.0 V and 50.00 Hz,
+`rel_s=1`, and around 350 W on the grid side for 550 W of PV.
+
+The whole device runs at about 0.2× real time; it needs the
 native accelerator, which `pip install` builds when a C compiler is present
 (the Docker images and the add-on have one).
 
