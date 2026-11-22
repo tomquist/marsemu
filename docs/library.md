@@ -113,7 +113,7 @@ factory data (e.g. the device-type index the B2500 derives its MQTT topics
 from). A B2500 v2 build accepts every type in its table (HMA, HMJ, HMK, ...), so
 the image alone doesn't say which unit it ran on: builds for the HMJ board
 (recognised by their ADC wiring) get HMJ-2, the others HMA-1, and
-`--device-type` picks another. `--state-dir` keeps flash and module state between runs, so a device can
+`--device-type` picks another. `--state-dir` keeps flash, the settings EEPROM or SPI flash and module state between runs, so a device can
 be "upgraded" by running an older and then a newer image on the same state.
 `plant/cosim.py` (lockstep timeline, CAN delivery at exact arrival times),
 `plant/canbus.py` and `plant/remote.py` (an MCU in its own process) are

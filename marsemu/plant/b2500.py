@@ -612,6 +612,11 @@ class B2500:
 
     CAPACITY_AH = 50.0
     CELLS = 14
+    #: configure_self_consumption waits this long after the subscription: for
+    #: 3 s after it subscribes the firmware (HMJ-2 110 and 116) holds an
+    #: incoming command and then drops it, whatever it is (a cd=10 restart, or
+    #: the cd=27 meter setting, which left HMJ-2 110 without a CT)
+    SETUP_DELAY_S = 5.0
 
     def __init__(self, firmware, *, pack: Optional[LfpPack] = None, pv: Sequence[float] = (0.0, 0.0),
                  inverter_w: Sequence[float] = (400.0, 400.0), control_kwargs: Optional[dict] = None,

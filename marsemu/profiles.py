@@ -30,6 +30,10 @@ class Profile:
     sram_kb: int = 144
     #: UART the FC41D sits on (e.g. "USART1"); None = first UART that sends "AT"
     fc41d_uart: Optional[str] = None
+    #: (port, pin) of the GPIO that switches the FC41D's power (high = on); the
+    #: module is off while the MCU drives it low and boots afresh when it goes
+    #: high again.  None: the module stays powered whatever the MCU does
+    fc41d_power: Optional[Tuple[str, int]] = None
     #: (port, pin) -> level for GPIO inputs that matter
     gpio_inputs: Dict[Tuple[str, int], int] = field(default_factory=dict)
     #: default level of floating GPIO inputs
@@ -274,13 +278,29 @@ register(Profile(
     device_type="HMA-1", flash_kb=256, setup=[seed_hma_record, seed_b2500_config]))
 register(Profile(
     "venus", "Venus C/E (HMG-x) control board, STM32G474", soc="stm32g4", hz=170_000_000, sram_kb=96,
-    device_type="HMG-50"))
+    device_type="HMG-50", setup=[lambda emu: control_eeprom(emu)]))
 register(Profile(
     "venus3", "Venus E 3.0 / A / D control board (VNSE3/VNSA/VNSD)", device_type="VNSE3-0", cpi=1,
     setup=[lambda emu: control_eeprom(emu)]))
+def mini_spi_flash(emu) -> None:
+    """The Venus E Mini's control board keeps its settings (and logs) in a
+    W25Qxx-style SPI NOR flash on SPI1, chip select PA4: Control 309 reads it
+    with 03, erases with 20 and polls 05 before it programs.  Without the chip
+    every setting is back at its default after a restart."""
+    from .periph.n32g45x import SpiNorFlash
+    spi = emu.machine.bus.peripherals.get("SPI1")
+    if spi is None or spi.device is not None:
+        return
+    path = os.path.join(emu.state_dir, "spiflash.bin") if emu.state_dir else None
+    spi.device = dev = SpiNorFlash(emu.machine, path=path, cs=(emu.machine.bus.get("GPIOA"), 4))
+    emu.persist.append(dev)
+
+
 register(Profile(
     "venus-mini", "Venus E Mini (VNSEMINI) control board (PMU), N32G45x, app at 0x08008000",
-    device_type="VNSEMINI-0"))
+    # PA1 powers the module: Control 309 holds it low for 5 s at every boot
+    # (0x0802ec30, 0x0802ec74), and again to recover the module
+    device_type="VNSEMINI-0", fc41d_uart="USART2", fc41d_power=("A", 1), setup=[mini_spi_flash]))
 register(Profile(
     "jupiter", "Jupiter C/E (HMM/HMN-x) and C Plus (JPLS-8H) control board", device_type="HMN-1"))
 def preloaded_module_certs(emu) -> None:
@@ -322,15 +342,27 @@ register(Profile(
     "ct00x", "CT002/CT003 smart meter (HME-x), STM32F0-class Cortex-M0", soc="stm32f0", hz=48_000_000,
     flash_kb=128, sram_kb=16, device_type="HME-4", fc41d_uart="USART1", setup=[ct_spi_flash, preloaded_module_certs, ct_meter_chip],
     notes="USART2 is a debug console that also echoes AT commands"))
+#: size of the Venus control boards' settings memory (settings up to 0x36BD,
+#: the firmware reads up to 0x4024, so at least 256 kbit)
+CONTROL_EEPROM_SIZE = 32768
+
+
 def control_eeprom(emu) -> None:
-    """Venus control boards keep their settings in a 24Cxx EEPROM at 0x50 on I2C1
-    (settings blocks up to 0x36BD, i.e. at least a 24C128)."""
+    """Venus control boards (E 3.0/A/D and C/E) keep their settings in a serial
+    memory at 0x50 on I2C1, two address bytes.  The E 3.0 firmware writes
+    whole blocks in one transaction (the 152-byte settings block with the
+    timer slots at 0x300, 120 bytes at 0x3700, 9-byte log records across 64-
+    and 128-byte boundaries) and its driver never splits a write by page; a
+    24C128/24C256, with 64-byte pages, would wrap those writes and scramble the
+    timer slots on every restart, which real units do not show.  So the part
+    is modelled without page wrap, as an FRAM or a 24Cxx with 256-byte pages
+    behaves for these writes.  The C/E writes it a byte at a time."""
     from .periph.n32g45x import I2cEeprom
     i2c = emu.machine.bus.peripherals.get("I2C1")
     if i2c is None or 0x50 in i2c.devices:
         return
     path = os.path.join(emu.state_dir, "eeprom.bin") if emu.state_dir else None
-    i2c.devices[0x50] = dev = I2cEeprom(0x50, 32768, 2, 64, path)
+    i2c.devices[0x50] = dev = I2cEeprom(0x50, CONTROL_EEPROM_SIZE, 2, CONTROL_EEPROM_SIZE, path)
     emu.persist.append(dev)
 
 

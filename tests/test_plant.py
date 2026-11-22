@@ -531,3 +531,24 @@ def test_only_polls_to_the_ct_port_reach_the_meter():
     net.udp_handler(NS(local_port=22222), b"poll", ("192.168.1.255", 12345))
     net.udp_handler(NS(local_port=22222), b"hello minis", ("192.168.1.255", 60606))
     assert m.polls == 1 and replies == [(b"answer", ("192.168.1.255", 12345))]
+
+
+def test_b2500_setup_waits_out_the_firmware_hold_after_subscribing():
+    """HMJ-2 110/116 hold a command arriving within 3 s of their subscription
+    and then drop it: the setup's meter command (cd=27) came 2 s after it and
+    left HMJ-2 110 without a CT (ct_t=7, no polls)."""
+    from types import SimpleNamespace
+    from marsemu.plant.b2500 import B2500
+    from marsemu.plant.cosim import CoSim
+    from marsemu.plant.venus3_cli import configure_self_consumption
+    sim = CoSim()
+    sent, handlers = [], {}
+    control = SimpleNamespace(image=b"...meter=...", on=lambda ev, fn: handlers.setdefault(ev, fn),
+                              mqtt_inject=lambda t, p: sent.append((sim.now, p)))
+    dev = B2500.__new__(B2500)
+    dev.sim, dev.control, dev.plant = sim, control, SimpleNamespace(v1=False)
+    configure_self_consumption(dev)
+    handlers["mqtt_subscribe"]("marstek_energy/HMJ-2/App/x/ctrl")
+    sim.run(20)
+    assert [p for _, p in sent] == ["cd=27,meter=3,mac=112233445566", "cd=18,md=1"]
+    assert sent[0][0] > 3.0

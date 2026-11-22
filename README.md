@@ -179,7 +179,7 @@ To script it from Python, see [docs/library.md](docs/library.md).
 | Venus E 3.0 | `venus3 CONTROL BMS` | control, BMS | inverter board, pack |
 | Venus D | `venusd CONTROL BMS` | control, BMS (one per pack) | inverter, MPPT, packs |
 | Venus A | `venusa CONTROL BMS` | control, BMS (one per pack) | inverter with MPPT, packs |
-| Venus C/E | Python only (`VenusCE`) | control, BMS | power stage at the control's pins |
+| Venus C/E | `venusce CONTROL BMS` | control, BMS | power stage at the control's pins |
 | Venus E Mini | `venusmini CONTROL` | control (with the battery management) | inverter, DC/DC, two-cell pack |
 | Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
 | B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |

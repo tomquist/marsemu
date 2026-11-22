@@ -60,7 +60,29 @@ def test_mqtt_flow_and_inline_publish():
     u.rx.clear()
     assert f.mqtt_deliver("x/App/1/ctrl", b"cd=1")
     m.advance(0.1)
-    assert b'+QMTRECV: 0,1,"x/App/1/ctrl",4,"cd=1"' in u.rx
+    assert b'+QMTRECV: 0,0,"x/App/1/ctrl",4,"cd=1"' in u.rx
+
+
+
+def test_qmtrecv_msgid_is_zero_for_qos0_and_counts_for_qos1():
+    """A QoS-0 message has no packet identifier: the FC41D reports msgid 0, and
+    the CT00x firmwares drop a +QMTRECV with any other msgid."""
+    m, f, u = module()
+    f.got_ip = True
+    f.on_tx(b'AT+QMTOPEN=0,"broker",8883\r\n')
+    m.advance(0.5)
+    f.on_tx(b'AT+QMTCONN=0,"client"\r\n')
+    m.advance(0.5)
+    f.on_tx(b'AT+QMTSUB=0,1,"q0",0\r\n')
+    f.on_tx(b'AT+QMTSUB=0,2,"q1",1\r\n')
+    m.advance(0.1)
+    u.rx.clear()
+    for topic in ("q0", "q0", "q1", "q1"):
+        assert f.mqtt_deliver(topic, b"x")
+    m.advance(5)
+    assert bytes(u.rx).count(b'+QMTRECV: 0,0,"q0",1,"x"') == 2
+    assert b'+QMTRECV: 0,1,"q1",1,"x"' in u.rx
+    assert b'+QMTRECV: 0,2,"q1",1,"x"' in u.rx
 
 
 def test_udp_send_with_trailing_address():
@@ -221,3 +243,164 @@ def test_mqtt_message_waits_for_a_command_reply_to_leave_the_uart():
     reply_end = max(t + len(d) * 10_000 / 115200 for t, d in log if b"QMTRECV" not in d)
     (t_recv,) = [t for t, d in log if b"+QMTRECV" in d]
     assert t_recv >= reply_end + f.cfg.urc_gap_ms - 0.01
+
+
+class _Broker:
+    """A minimal MQTT 3.1.1 broker on localhost: CONNACKs every CONNECT and,
+    like mosquitto, closes an older connection that has the same client ID."""
+
+    def __init__(self):
+        import socket
+        import threading
+        self.srv = socket.socket()
+        self.srv.bind(("127.0.0.1", 0))
+        self.srv.listen()
+        self.port = self.srv.getsockname()[1]
+        self.by_client = {}
+        self.connects = 0
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self):
+        import threading
+        while True:
+            try:
+                c, _ = self.srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(c,), daemon=True).start()
+
+    def _serve(self, c):
+        try:
+            data = c.recv(4096)
+            if not data or data[0] >> 4 != 1:
+                return
+            # fixed header (1 byte type, 1 byte length for short packets),
+            # protocol name, level, flags, keepalive, then the client ID
+            i = 2 + 2 + data[3] + 4
+            cid = data[i + 2:i + 2 + int.from_bytes(data[i:i + 2], "big")]
+            old = self.by_client.get(cid)
+            self.by_client[cid] = c
+            if old is not None:
+                import socket
+                old.shutdown(socket.SHUT_RDWR)
+                old.close()
+            self.connects += 1
+            c.sendall(b"\x20\x02\x00\x00")
+            while c.recv(4096):
+                pass
+        except OSError:
+            pass
+
+    def close(self):
+        self.srv.close()
+        for c in self.by_client.values():
+            c.close()
+
+
+def _wait_for(m, u, text, seconds=5.0):
+    import time
+    end = time.time() + seconds
+    while time.time() < end:
+        m.advance(0.01)
+        if text in u.rx:
+            return True
+        time.sleep(0.005)
+    return False
+
+
+def test_broker_connect_is_answered_after_the_modelled_connect_time():
+    """A local broker answers within a millisecond; the module still takes
+    its usual connect time, as B2500 (HMJ) firmware misses a +QMTCONN that
+    comes sooner and starts the connection over."""
+    b = _Broker()
+    try:
+        m = Machine()
+        n32g45x.build(m)
+        f = Fc41d(m, Network(mqtt="broker", broker=("127.0.0.1", b.port), mqtt_connect_ms=150),
+                  Fc41dConfig(reply_ms=0))
+        u = FakeUart()
+        f.attach(u)
+        f.got_ip = True
+        f.on_tx(b'AT+QMTOPEN=0,"broker",8883\r\n')
+        m.advance(0.5)
+        t0 = m.clock.seconds
+        f.on_tx(b'AT+QMTCONN=0,"client"\r\n')
+        assert _wait_for(m, u, b"+QMTCONN: 0,0,0")
+        assert m.clock.seconds - t0 >= 0.15
+    finally:
+        b.close()
+
+
+def test_broker_reconnect_does_not_drop_the_new_connection():
+    """Connecting a session again replaces its broker connection; the broker
+    closing the old one for the shared client ID is no connection loss."""
+    b = _Broker()
+    try:
+        m = Machine()
+        n32g45x.build(m)
+        f = Fc41d(m, Network(mqtt="broker", broker=("127.0.0.1", b.port), mqtt_connect_ms=0),
+                  Fc41dConfig(reply_ms=0))
+        u = FakeUart()
+        f.attach(u)
+        f.got_ip = True
+        f.on_tx(b'AT+QMTOPEN=0,"broker",8883\r\n')
+        m.advance(0.5)
+        f.on_tx(b'AT+QMTCONN=0,"client"\r\n')
+        assert _wait_for(m, u, b"+QMTCONN: 0,0,0")
+        u.rx.clear()
+        f.on_tx(b'AT+QMTCONN=0,"client"\r\n')
+        assert _wait_for(m, u, b"+QMTCONN: 0,0,0")
+        assert not _wait_for(m, u, b"+QMTSTAT", 0.5)
+        assert b.connects == 2
+        assert f.mqtt[0].connected
+    finally:
+        b.close()
+
+
+def test_module_power_pin():
+    """The Venus E Mini switches the module's power with PA1: low turns the
+    module off (connections drop, no answers), high boots it afresh, so its
+    Wi-Fi comes up and is announced again after the MCU restarts."""
+    m, f, u = module()
+    gpio = m.bus.get("GPIOA")
+    f.power_from_gpio(gpio, 1)
+    f.power_on()
+    m.advance(5.0)
+    assert f.got_ip and b"+QSTASTAT:GOT_IP" in u.rx
+    f.on_tx(b'AT+QMTOPEN=0,"broker",8883\r\n')
+    m.advance(0.5)
+    assert f.mqtt[0].open
+    u.rx.clear()
+    # the MCU makes PA1 an output; it is low already, so only the mode changes
+    gpio.write32(0x00, (gpio.regs[0x00] & ~0xF0) | 0x20)
+    assert not f.powered and not f.got_ip and not f.mqtt
+    f.on_tx(b"AT+QVERSION\r\n")
+    m.advance(5.0)
+    assert u.rx == b""                                         # off: no answer, no URC
+    gpio.write32(0x10, 1 << 1)                                 # PA1 high
+    assert f.powered
+    m.advance(5.0)
+    assert b"ready" in u.rx and b"+QSTASTAT:GOT_IP" in u.rx
+    f.on_tx(b"AT+QVERSION\r\n")
+    assert b"+QVERSION:" in u.rx
+    # held low across an MCU reset: the reset releases the pin (pulled up), the module boots
+    gpio.write32(0x14, 1 << 1)
+    assert not f.powered
+    gpio.reset()
+    assert f.powered
+
+
+def test_spi_nor_flash_saves_only_after_a_change(tmp_path):
+    from marsemu.periph.n32g45x import SpiNorFlash
+    m = Machine()
+    n32g45x.build(m)
+    path = tmp_path / "spi.bin"
+    fl = SpiNorFlash(m, size=1 << 12, path=str(path))
+    fl.save()
+    assert not path.exists()
+    for cmd in ((0x06,), (0x02, 0, 0, 0, 7)):
+        for b in cmd:
+            fl.xfer(b)
+        fl._end()
+    fl.save()
+    assert path.read_bytes()[0] == 7

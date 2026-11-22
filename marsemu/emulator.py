@@ -162,6 +162,9 @@ class Emulator:
         m.reset()
         if uart:
             self.bind_fc41d(uart)
+        if p.fc41d_power and self.external is None:
+            port, pin = p.fc41d_power
+            self.fc41d.power_from_gpio(m.bus.get("GPIO" + port), pin)
         log.info("profile %s: %s", p.name, p.description)
 
     def _init_c28x(self, network, fc41d, state_dir, uid, watchdog, fc41d_uart, external_module, idle_skip):
