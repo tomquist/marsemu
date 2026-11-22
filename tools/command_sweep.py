@@ -105,12 +105,20 @@ def status(dev: Device, topic: str, wait: float) -> dict:
 
 
 def one(dev: Device, topic: str, payload: str, wait: float, status_wait: float) -> dict:
+    """``payload`` may be several commands separated by ``;``, sent one after
+    the other in the same fork (e.g. a setting, then a reset)."""
     before = status(dev, topic, status_wait)
     resets = dev.emu.machine.reset_count
     n = len(dev.log)
     t0 = dev.t
-    dev.emu.mqtt_inject(topic, payload)
-    dev.run(wait)
+    for part in payload.split(";"):
+        dev.emu.mqtt_inject(topic, part.strip())
+        dev.run(wait)
+    if dev.emu.machine.reset_count != resets:
+        # it rebooted: wait until it is back on its topic (twice after a first boot)
+        subs = len(dev.subs)
+        dev.run(90.0, until=lambda: len(dev.subs) >= subs + 2)
+        dev.run(3.0)
     seen = dev.log[n:]
     after = status(dev, topic, status_wait)
     changed = {k: [before.get(k), v] for k, v in after.items() if before.get(k) != v}
@@ -133,7 +141,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("firmware", nargs="?")
     ap.add_argument("--cd", default="", metavar="RANGE", help="command numbers, e.g. 0-120 or 1,8,11,22")
-    ap.add_argument("--payload", action="append", default=[], help="a whole payload to send (repeatable)")
+    ap.add_argument("--payload", action="append", default=[],
+                    help="a whole payload to send (repeatable); several commands separated by ';' run in one fork")
     ap.add_argument("--wait", type=float, default=4.0, help="emulated seconds to watch after each command")
     ap.add_argument("--boot", type=float, default=45.0, help="emulated seconds of boot before sweeping, at most")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
