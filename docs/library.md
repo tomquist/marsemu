@@ -32,7 +32,7 @@ strings and the grid, and `set_grid` takes the grid away or changes it.
 from marsemu import Hmi
 
 h = Hmi("firmwares/HMI-1/Control/132/132_control_HMI-1_20251010160748845913037.bin", pv=[400, 350])
-h.run(120)                              # observes the grid, closes its relay (~36 s), feeds in
+h.run(120)                              # observes the grid, closes its relay, feeds in (~20 s)
 print(h.status())                       # ac_w, pv_v/pv_a/pv_w per string, relay, grid
 h.set_grid(False)                       # the relay opens; h.set_grid(True, volts=240, hz=50)
 h.run(10)

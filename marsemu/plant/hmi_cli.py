@@ -4,7 +4,7 @@ The HMI firmware runs on the emulated TMS320F28035 (CPU and CLA); the plant
 model supplies the grid, the two PV strings and the flyback power stage, so
 the firmware detects the grid, observes it, closes its relay and tracks the
 maximum power point of each string as the real one does.  Power flows about
-36 s of emulated time after boot.
+20 s of emulated time after boot.
 
 Examples::
 

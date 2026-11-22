@@ -313,8 +313,8 @@ see [internals](internals.md)) and models the board around them at the pins:
 marsemu hmi HMI-1/Control/132/*.bin --pv 300,250 -t 300
 ```
 
-About 36 s after boot (a first start with an empty EEPROM) the relay closes
-and both inputs feed in; `cd=1` then reports the grid as 230.0 V and 50.00 Hz,
+The relay closes within about 10 s of boot and both inputs feed in from about
+20 s; `cd=1` then reports the grid as 230.0 V and 50.00 Hz,
 `rel_s=1`, and around 350 W on the grid side for 550 W of PV.
 
 The whole device runs at about 0.2× real time; it needs the
