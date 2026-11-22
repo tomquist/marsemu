@@ -164,8 +164,11 @@ def describe(name: str, size: int, info: dict) -> dict:
         cls = SESSION_TYPES[profile]
         # an image lists its meters' types too: the Mini's own is VNSEMINI
         own = next((t for t in types if t.startswith("VNSEMINI")), None) if profile == "venus-mini" else None
+        if profile == "hmi":
+            # one image serves every HMI variant; its file name says which this is
+            own = next((t for t in sorted(types, key=len, reverse=True) if t in name), None)
         d.update(model=cls.MODEL, supported=True, session=cls.__name__,
-                 pv_inputs=2 if cls.__name__ == "B2500Session" else 0,
+                 pv_inputs=getattr(cls, "PV_INPUTS", 2 if cls.__name__ == "B2500Session" else 0),
                  device_type=d["device_type"] or own or next(iter(types), None))
     elif profile in PAIRED_TYPES:
         # a control image lists every type it serves (and the meters'): its own decides

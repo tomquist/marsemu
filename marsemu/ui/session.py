@@ -1241,9 +1241,117 @@ class CtSession(DeviceSession):
                 "batteries": [{k: v for k, v in b.items()} for b in self.batteries[:self.n_batteries]]}
 
 
+# ========================================================================= HMI
+class HmiSession(DeviceSession):
+    """A Saturn M microinverter (HMI) feeding a house: its one F28035 (CPU and
+    CLA) runs the whole device; the plant gives it the grid, two PV strings
+    and the flyback power stage.  No battery, and no CT: what it delivers
+    lowers the house's import."""
+
+    MODEL = "HMI"
+    HAS_PACK = False
+    PV_INPUTS = 2
+    CHANNELS = ("FW", "SCIA", "LINA", "MQTT", "RF", "BLE", "EVT", "ALARM")
+
+    def __init__(self, firmware: str, *, pv=(300.0, 300.0), **kw):
+        for k in ("packs", "bms", "extension_packs", "batteries", "battery_w", "soc"):
+            kw.pop(k, None)
+        self.sun = [float(x) for x in pv][:2] + [0.0] * (2 - len(pv))
+        kw["setup"] = False
+        super().__init__(firmware, **kw)
+
+    def _build(self, control_kwargs: dict, soc: float, **_):
+        from ..plant.hmi import Hmi
+        dev = Hmi(self.firmware, pv=list(self.sun), ambient_c=self.ambient_c, control_kwargs=control_kwargs)
+        self.plant = dev.plant
+        return dev
+
+    def _hook_device(self) -> None:
+        # the debug console on LIN-A: what the firmware prints there
+        def lina(data: bytes) -> None:
+            text = data.decode("latin1", "replace").strip()
+            if text:
+                self._log("LINA", "MCU→console", text[:200])
+        lin = self.emu.machine.get("LINA")
+        if hasattr(lin, "tx_listeners"):
+            lin.tx_listeners.append(lina)
+        self._relay = None
+        self.dev.sim.every(0.5, self._watch_relay)
+
+    def _watch_relay(self, now: float) -> None:
+        r = self.plant.relay
+        if r != self._relay and self._relay is not None:
+            self._log("EVT", "", "grid relay closed: feeding in" if r else "grid relay open")
+            self._mark = "relay on" if r else "relay off"
+        self._relay = r
+
+    def _sample(self) -> dict:
+        return {"grid": round(self.house.grid()["A"], 1), "ac": round(self.dev.ac_power, 1),
+                "pv": round(sum(f.p for f in self.plant.inputs), 1), "bat": 0.0, "soc": 0.0, "v": 0.0,
+                "cmin": 0.0, "cmax": 0.0, "bal": False}
+
+    def _set_ambient(self, c: float) -> None:
+        self.plant.ambient_c = c
+
+    def _apply(self, c: dict) -> None:
+        if c.get("op") == "ambient":
+            self.ambient_c = float(c["c"])
+            self._set_ambient(self.ambient_c)
+            return
+        super()._apply(c)
+
+    def _apply_device(self, c: dict) -> bool:
+        op = c.get("op")
+        if op == "pv":
+            self.sun = [max(0.0, float(x)) for x in c["w"]][:2]
+            self.dev.set_pv(self.sun)
+            return True
+        if op == "grid":
+            self.dev.set_grid(bool(c.get("on", True)), c.get("v"), c.get("hz"))
+            self._log("EVT", "", f"grid {'on' if self.plant.grid_on else 'off'}: {self.plant.grid_v:.0f} V {self.plant.grid_hz:.2f} Hz")
+            self._mark = "grid " + ("on" if self.plant.grid_on else "off")
+            return True
+        if op == "scenario" and c.get("name") == "cloud":
+            self.dev.set_pv([w * 0.15 for w in self.sun])
+            self._log("EVT", "", "scenario: passing cloud, PV to 15 % for 40 s")
+            self._mark = "cloud"
+
+            def sun_back():
+                self.dev.set_pv(self.sun)
+                self._log("EVT", "", "scenario: cloud passed")
+                self._mark = "sun back"
+            self.dev.sim.after(40.0, sun_back)
+            return True
+        if op == "scenario" and c.get("name") == "grid_loss":
+            self.dev.set_grid(False)
+            self._log("ALARM", "", "scenario: grid lost for 20 s")
+            self._mark = "grid lost"
+
+            def back():
+                self.dev.set_grid(True)
+                self._log("EVT", "", "scenario: grid back")
+                self._mark = "grid back"
+            self.dev.sim.after(20.0, back)
+            return True
+        return False
+
+    def _device_snapshot(self) -> dict:
+        st = self.plant
+        m = self.emu.machine
+        ep = m.epwm
+        return {
+            "pv": [{"avail": round(a, 1), "w": round(f.p, 1), "v": round(f.v, 2), "a": round(f.i, 3)}
+                   for a, f in zip(self.sun, st.inputs)],
+            "stage": {"relay": st.relay, "grid_on": st.grid_on, "grid_v": st.grid_v, "grid_hz": st.grid_hz,
+                      "state": m.cpu.mem[0x8684], "duty": [round(ep[k].duty("A"), 4) for k in range(1, 5)]},
+            "mcu": {"regs": {f"EPWM{k}_CMPA": ep[k].cmpa for k in range(1, 5)} | {"GPADAT": m.gpio.dat(0)},
+                    "cla": {"tasks": getattr(m.cla, "runs", None)}},
+        }
+
+
 SESSION_TYPES: Dict[str, Callable[..., DeviceSession]] = {
     "b2500-v1": B2500Session, "b2500-v2": B2500Session, "b2500-v3": B2500Session, "ct00x": CtSession,
-    "venus-mini": VenusMiniSession,
+    "venus-mini": VenusMiniSession, "hmi": HmiSession,
 }
 #: control profile -> [(session, device types it covers)]: the control image's types tell them apart
 PAIRED_TYPES: Dict[str, list] = {
@@ -1255,6 +1363,6 @@ PAIRED_TYPES: Dict[str, list] = {
 #: sessions that run without a BMS image too
 BMS_OPTIONAL = (JupiterSession,)
 
-__all__ = ["DeviceSession", "B2500Session", "VenusMiniSession", "VenusE3Session", "VenusDSession", "VenusASession", "JupiterSession",
+__all__ = ["DeviceSession", "B2500Session", "HmiSession", "VenusMiniSession", "VenusE3Session", "VenusDSession", "VenusASession", "JupiterSession",
            "VenusCESession", "CtSession", "SESSION_TYPES", "PAIRED_TYPES", "BMS_OPTIONAL", "Event",
            "decode_venus_can"]

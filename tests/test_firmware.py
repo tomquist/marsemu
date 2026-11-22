@@ -31,6 +31,7 @@ if EXTRA:
         ("ct002-HME4-124", f"{EXTRA}/**/HME-4/124/*.bin", 90),
         ("jupiter-JPLS-143", f"{EXTRA}/**/JPLS-8H/143/*.bin", 70),
         ("venus-mini-VNSEMINI-309", f"{EXTRA}/**/VNSEMINI-0/Control/309/*.bin", 40),
+        ("hmi-HMI-1-132", f"{EXTRA}/**/HMI-1/Control/132/*.bin", 40),
     ]
 
 

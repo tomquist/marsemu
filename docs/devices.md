@@ -12,6 +12,7 @@ What marsemu runs for each device, and what it models around the real firmware.
 | Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
 | B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |
 | B2500 v1 (HMB) | `b2500 FIRMWARE` | the one MCU | front end, PV, switched outputs |
+| Saturn M microinverter (HMI) | `hmi FIRMWARE` | the one MCU (C28x CPU and CLA) | grid, relay, two PV strings, flyback power stage |
 | CT002/CT003, any other image | `run FIRMWARE` | the image | — |
 
 Every whole-device command takes `--load A[,B,C]` (house load per phase),
@@ -282,6 +283,7 @@ started the way the bootloader would; full images run the bootloader first.
 | `jupiter` | Jupiter C/E (HMM/HMN), C Plus (JPLS-8H) | N32G45x | USART1 | reaches MQTT; whole device |
 | `venus-mini` | Venus E Mini (VNSEMINI) control, 309 | N32G45x | USART2 | reaches MQTT; whole device |
 | `ct00x` | CT002/CT003 (HME) | STM32F0-class | USART1 | reaches MQTT (the module claims the factory certificates) |
+| `hmi` | Saturn M microinverter (HMI-1/2/5/6/9/350/500), 132 | TMS320F28035 (C28x + CLA) | SCI-A | reaches MQTT (~22 s); whole device |
 | `aux` | BMS and other MCUs without an FC41D (N32) | – | – | boot; the Venus BMSes run fully with their front-end models |
 | `aux-g4` | STM32G474 inverter boards (Venus D/E 3.0/E Mini "micro") | – | – | boot; the Venus D/E 3.0 ones answer the control's CAN commands; Micro 270 (Mini) runs at about 1/40 of real time |
 

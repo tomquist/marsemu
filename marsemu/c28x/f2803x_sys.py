@@ -120,6 +120,41 @@ class SysCtrl(C28xPeripheral):
         super().write(off, v)
 
 
+#: F2803x PIE channels by (group, channel)
+PIE_NAMES = {
+    (1, 1): "ADCINT1", (1, 2): "ADCINT2", (1, 4): "XINT1", (1, 5): "XINT2", (1, 6): "ADCINT9", (1, 7): "TINT0",
+    (1, 8): "WAKEINT", (2, 1): "EPWM1_TZINT", (2, 2): "EPWM2_TZINT", (2, 3): "EPWM3_TZINT", (2, 4): "EPWM4_TZINT",
+    (2, 5): "EPWM5_TZINT", (2, 6): "EPWM6_TZINT", (2, 7): "EPWM7_TZINT", (3, 1): "EPWM1_INT", (3, 2): "EPWM2_INT",
+    (3, 3): "EPWM3_INT", (3, 4): "EPWM4_INT", (3, 5): "EPWM5_INT", (3, 6): "EPWM6_INT", (3, 7): "EPWM7_INT",
+    (4, 1): "ECAP1_INT", (5, 1): "EQEP1_INT", (6, 1): "SPIRXINTA", (6, 2): "SPITXINTA", (6, 3): "SPIRXINTB",
+    (6, 4): "SPITXINTB", (8, 1): "I2CINT1A", (8, 2): "I2CINT2A", (9, 1): "SCIRXINTA", (9, 2): "SCITXINTA",
+    (9, 3): "LIN0INTA", (9, 4): "LIN1INTA", (9, 5): "ECAN0INTA", (9, 6): "ECAN1INTA",
+    **{(10, n): f"ADCINT{n}" for n in range(1, 9)}, **{(11, n): f"CLA1_INT{n}" for n in range(1, 9)},
+    (12, 1): "XINT3", (12, 7): "LVF", (12, 8): "LUF",
+}
+
+
+class InterruptCounts:
+    """The dashboard's view of the interrupts taken (what ``nvic.irq_count``
+    and ``nvic.irq_names`` are on the Cortex-M machines): PIE channel
+    (group g, channel y) is number (g-1)*8 + y-1, CPU timers 1 and 2 (INT13,
+    INT14) follow at 96 and 97."""
+
+    def __init__(self, m):
+        self.m = m
+        self.irq_names = {(g - 1) * 8 + y - 1: n for (g, y), n in PIE_NAMES.items()}
+        self.irq_names.update({96: "TINT1", 97: "TINT2"})
+
+    @property
+    def irq_count(self):
+        counts = [0] * (16 + 98)
+        for (g, y), c in self.m.pie.counts.items():
+            counts[16 + (g - 1) * 8 + y - 1] = c
+        counts[16 + 96] = self.m.int_count[13]
+        counts[16 + 97] = self.m.int_count[14]
+        return counts
+
+
 class Pie(C28xPeripheral):
     """Peripheral interrupt expansion (0x0CE0): 12 groups of 8 interrupts
     multiplexed onto CPU INT1..INT12, vectors in the PIE RAM at 0x0D00."""

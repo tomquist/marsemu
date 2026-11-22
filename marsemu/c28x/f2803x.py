@@ -128,6 +128,7 @@ def build(m: C28xMachine, models: Optional[Dict[str, type]] = None) -> None:
     m.adc.temp_raw = temp_raw(30.0)
     m.cla = m.get("CLA1")
     cpu.iack_hook = m.cla.iack
+    m.nvic = sysp.InterruptCounts(m)
     m.adc.int_listeners.append(lambda n: m.cla.peripheral_irq("adc", n))
     m.get("ADCRESULT").adc = m.adc
     # ADCRESULT0-15 are read-only: served from the memory the ADC writes

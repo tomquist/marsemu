@@ -8,6 +8,9 @@ FROM python:3.13-slim
 # makes a new version download marsemu again instead of reusing Docker's cache.
 ARG MARSEMU_REF=main
 ARG BUILD_VERSION
-RUN echo "add-on ${BUILD_VERSION}" && pip install --no-cache-dir "marsemu @ https://github.com/tomquist/marsemu/archive/${MARSEMU_REF}.tar.gz"
+# gcc only to build the optional C2000 accelerator the Saturn M microinverter runs on; it goes again after
+RUN echo "add-on ${BUILD_VERSION}" && apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && pip install --no-cache-dir "marsemu @ https://github.com/tomquist/marsemu/archive/${MARSEMU_REF}.tar.gz" \
+    && apt-get purge -y gcc libc6-dev && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 CMD ["python", "-m", "marsemu.ui.addon"]

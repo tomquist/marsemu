@@ -35,6 +35,7 @@ class Epwm(C28xPeripheral):
 
     def __init__(self, m, name, base, size, index: int = 1):
         super().__init__(m, name, base, size)
+        self._duty_memo: dict = {}
         self.index = index
         self.next_in_chain: Optional["Epwm"] = None
         self.tz_listeners: List[Callable] = []
@@ -370,12 +371,22 @@ class Epwm(C28xPeripheral):
         if csfrc == 2:
             return 1.0
         prd = self.prd
-        if prd == 0 or self.mode() == FREEZE:
+        mode = self.mode()
+        if prd == 0 or mode == FREEZE:
             return 0.0
         aq = self.r(0x0B if ch == "A" else 0x0C)
+        key = (prd, mode, aq, self.cmpa, self.cmpb)
+        memo = self._duty_memo
+        d = memo.get(key)
+        if d is None:
+            if len(memo) > 512:
+                memo.clear()
+            d = memo[key] = self._duty(prd, mode, aq)
+        return d
+
+    def _duty(self, prd: int, mode: int, aq: int) -> float:
         zro, prd_a, cau, cad, cbu, cbd = aq & 3, (aq >> 2) & 3, (aq >> 4) & 3, (aq >> 6) & 3, (aq >> 8) & 3, (aq >> 10) & 3
         ca, cb = self.cmpa, self.cmpb
-        mode = self.mode()
         # walk one period as a list of (time in ticks, action)
         events = []
         if mode == UPDOWN:

@@ -122,6 +122,9 @@ def test_images_are_classified():
     assert mini["device_type"] == "VNSEMINI-0" and mini["pv_inputs"] == 0
     ct = describe("124_HME-4.bin", 1, {"profile": "ct00x", "device_types": ["HME-4"]})
     assert ct["supported"] and ct["model"] == "CT002 / CT003"
+    hmi = describe("132_control_HMI-5_2025.bin", 1, {"profile": "hmi", "device_types": ["HMI-2", "HMI-1", "HMI-5"]})
+    assert hmi["supported"] and hmi["model"] == "HMI" and hmi["pv_inputs"] == 2 and not hmi["needs_bms"]
+    assert hmi["device_type"] == "HMI-5"
     assert describe("115_bms.bin", 1, {"profile": "aux"})["role"] == "bms"
 
 

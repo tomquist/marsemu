@@ -164,6 +164,8 @@ class C28xMachine:
         self.idle_loops: Dict[int, list] = {}
         self.idle_sleeps = 0
         self.exc_count = 0
+        #: interrupts taken per CPU line (1..14 INT1..INT14, 15 DLOGINT, 16 RTOSINT)
+        self.int_count = [0] * 32
         self.cpu.ack_hook = self._on_ack
         self.flash_size = 0
         self.peripherals["RTC"] = VirtualClockTime(self)
@@ -259,6 +261,7 @@ class C28xMachine:
 
     def _on_ack(self, k: int) -> None:
         self.exc_count += 1
+        self.int_count[k] += 1
 
     def set_idle_loop(self, addr: int, feeds_watchdog: bool = False) -> None:
         """Sleep at ``addr`` (head of a wait loop) when an iteration went by
