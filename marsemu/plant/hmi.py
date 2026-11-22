@@ -59,6 +59,9 @@ CH_PE = 10                        # B2
 RELAY_GPIO = 21
 #: conversion noise, +/- counts
 ADC_NOISE = 2
+#: what status() and the AC power average over, s (the flybacks draw in pulses)
+AVG_S = 0.04
+AC_AVG_S = 0.2
 
 
 class Flyback:
@@ -81,6 +84,9 @@ class Flyback:
         self.i = 0.0          # converter input current (switching-period average), A
         self.p = 0.0          # converter input power now, W
         self.energy = 0.0     # J drawn since start, for averages
+        #: averages over a few grid cycles: the flybacks draw in pulses
+        self.p_avg = 0.0
+        self.i_avg = 0.0
 
     def conductance(self) -> float:
         """Input current per volt the converter draws now: each phase stores
@@ -98,7 +104,7 @@ class Flyback:
         if dt <= 0:
             return
         if arr.isc <= 0:          # no light: no voltage either
-            self.v = self.i = self.p = 0.0
+            self.v = self.i = self.p = self.p_avg = self.i_avg = 0.0
             return
         k = min(1.0, dt / self.buffer_s) if self.buffer_s > 0 else 1.0
         self.g_avg += (g - self.g_avg) * k
@@ -126,6 +132,9 @@ class Flyback:
         self.i = g * self.v
         self.p = self.i * self.v
         self.energy += self.p * dt
+        k = min(1.0, dt / AVG_S)
+        self.p_avg += (self.p - self.p_avg) * k
+        self.i_avg += (self.i - self.i_avg) * k
 
 
 class HmiPlant:
@@ -147,9 +156,9 @@ class HmiPlant:
         self.relay = False
         self._t = self.clock.seconds
         self._phase0 = 0.0       # grid phase at clock 0, rad
-        self._ac_energy = 0.0
-        self._ac_t0 = self._t
-        self.ac_w = 0.0          # AC power, averaged over the last report interval
+        #: AC energy fed in since start, J
+        self.ac_energy = 0.0
+        self.ac_w = 0.0          # AC power, averaged over the last ~0.2 s
         self.ecap = m.get("ECAP1")
         #: what each ADC channel reads; mid-scale where nothing is modelled
         self._adc_vals = [2048] * 16
@@ -219,17 +228,12 @@ class HmiPlant:
             g = fb.conductance() if connected else 0.0
             fb.step(dt, g)
             p_ac += fb.p * fb.efficiency
-        self._ac_energy += p_ac * dt
+        self.ac_energy += p_ac * dt
+        self.ac_w += (p_ac - self.ac_w) * min(1.0, dt / AC_AVG_S)
 
     def ac_power(self) -> float:
-        """Average AC power since the last call, W."""
+        """AC power fed in, averaged over the last ~0.2 s, W."""
         self._advance()
-        now = self._t
-        span = now - self._ac_t0
-        if span > 0:
-            self.ac_w = self._ac_energy / span
-            self._ac_energy = 0.0
-            self._ac_t0 = now
         return self.ac_w
 
     # -- ADC
@@ -271,8 +275,8 @@ class HmiPlant:
         self._advance()
         return {
             "pv_v": [round(f.v, 2) for f in self.inputs],
-            "pv_a": [round(f.i, 3) for f in self.inputs],
-            "pv_w": [round(f.p, 1) for f in self.inputs],
+            "pv_a": [round(f.i_avg, 3) for f in self.inputs],
+            "pv_w": [round(f.p_avg, 1) for f in self.inputs],
             "relay": self.relay,
             "grid_v": self.grid_v if self.grid_on else 0.0,
             "grid_hz": self.grid_hz,

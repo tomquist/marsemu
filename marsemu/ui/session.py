@@ -1287,7 +1287,7 @@ class HmiSession(DeviceSession):
 
     def _sample(self) -> dict:
         return {"grid": round(self.house.grid()["A"], 1), "ac": round(self.dev.ac_power, 1),
-                "pv": round(sum(f.p for f in self.plant.inputs), 1), "bat": 0.0, "soc": 0.0, "v": 0.0,
+                "pv": round(sum(f.p_avg for f in self.plant.inputs), 1), "bat": 0.0, "soc": 0.0, "v": 0.0,
                 "cmin": 0.0, "cmax": 0.0, "bal": False}
 
     def _set_ambient(self, c: float) -> None:
@@ -1340,7 +1340,7 @@ class HmiSession(DeviceSession):
         m = self.emu.machine
         ep = m.epwm
         return {
-            "pv": [{"avail": round(a, 1), "w": round(f.p, 1), "v": round(f.v, 2), "a": round(f.i, 3)}
+            "pv": [{"avail": round(a, 1), "w": round(f.p_avg, 1), "v": round(f.v, 2), "a": round(f.i_avg, 3)}
                    for a, f in zip(self.sun, st.inputs)],
             "stage": {"relay": st.relay, "grid_on": st.grid_on, "grid_v": st.grid_v, "grid_hz": st.grid_hz,
                       "state": m.cpu.mem[0x8684], "duty": [round(ep[k].duty("A"), 4) for k in range(1, 5)]},
