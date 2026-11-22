@@ -66,6 +66,24 @@ class _Board:
         self.persist = []
 
 
+def test_venus_control_eeprom_keeps_a_whole_settings_block():
+    """The Venus E 3.0 writes its 152-byte settings block (timer slots
+    included) at 0x300 in one transaction; all of it reads back."""
+    from marsemu.profiles import control_eeprom
+    b = _Board()
+    control_eeprom(b)
+    ee = b.machine.bus.get("I2C1").devices[0x50]
+    block = bytes(range(1, 153))
+    ee.start(False)
+    for x in (0x03, 0x00) + tuple(block):
+        ee.write(x)
+    ee.stop()
+    ee.start(False)
+    ee.write(0x03), ee.write(0x00)
+    ee.start(True)
+    assert bytes(ee.read() for _ in range(152)) == block
+
+
 def test_venus_mini_settings_flash_survives_a_reset(tmp_path):
     """The Mini's settings live in an SPI NOR flash on SPI1 (chip select PA4)."""
     from marsemu.profiles import PROFILES
@@ -94,3 +112,32 @@ def test_venus_mini_settings_flash_survives_a_reset(tmp_path):
     for dev in b.persist:
         dev.save()
     assert (tmp_path / "spiflash.bin").read_bytes()[0xA000] == 0x46
+
+
+def test_venus_ce_settings_eeprom_on_the_stm32_i2c():
+    """The Venus C/E control (STM32G474) reads and writes its settings a byte
+    at a time on I2C1 at 0x50 with two address bytes; without the EEPROM model
+    an auto-created one-byte-address stand-in scrambled them (set_v=80 after a
+    restart)."""
+    from marsemu.periph.n32g45x import I2cEeprom
+    from marsemu.profiles import PROFILES
+    b = _Board(soc="stm32g4")
+    for fn in PROFILES["venus"].setup:
+        fn(b)
+    i2c = b.machine.bus.get("I2C1")
+    assert isinstance(i2c.devices[0x50], I2cEeprom)
+
+    def xfer(n, read=False, data=()):
+        i2c.write32(0x04, (0x50 << 1) | (read << 10) | (n << 16) | (1 << 13) | (1 << 25))
+        out = []
+        for x in data:
+            i2c.write32(0x28, x)
+        if read:
+            out = [i2c.read32(0x24) for _ in range(n)]
+        return out
+    xfer(3, data=(0x00, 0x2B, 156))                     # one byte at 0x002B
+    xfer(2, data=(0x00, 0x2B))
+    assert xfer(1, read=True) == [156]
+    b.machine.reset()
+    xfer(2, data=(0x00, 0x2B))
+    assert xfer(1, read=True) == [156]

@@ -278,7 +278,7 @@ register(Profile(
     device_type="HMA-1", flash_kb=256, setup=[seed_hma_record, seed_b2500_config]))
 register(Profile(
     "venus", "Venus C/E (HMG-x) control board, STM32G474", soc="stm32g4", hz=170_000_000, sram_kb=96,
-    device_type="HMG-50"))
+    device_type="HMG-50", setup=[lambda emu: control_eeprom(emu)]))
 register(Profile(
     "venus3", "Venus E 3.0 / A / D control board (VNSE3/VNSA/VNSD)", device_type="VNSE3-0", cpi=1,
     setup=[lambda emu: control_eeprom(emu)]))
@@ -342,15 +342,27 @@ register(Profile(
     "ct00x", "CT002/CT003 smart meter (HME-x), STM32F0-class Cortex-M0", soc="stm32f0", hz=48_000_000,
     flash_kb=128, sram_kb=16, device_type="HME-4", fc41d_uart="USART1", setup=[ct_spi_flash, preloaded_module_certs, ct_meter_chip],
     notes="USART2 is a debug console that also echoes AT commands"))
+#: size of the Venus control boards' settings memory (settings up to 0x36BD,
+#: the firmware reads up to 0x4024, so at least 256 kbit)
+CONTROL_EEPROM_SIZE = 32768
+
+
 def control_eeprom(emu) -> None:
-    """Venus control boards keep their settings in a 24Cxx EEPROM at 0x50 on I2C1
-    (settings blocks up to 0x36BD, i.e. at least a 24C128)."""
+    """Venus control boards (E 3.0/A/D and C/E) keep their settings in a serial
+    memory at 0x50 on I2C1, two address bytes.  The E 3.0 firmware writes
+    whole blocks in one transaction (the 152-byte settings block with the
+    timer slots at 0x300, 120 bytes at 0x3700, 9-byte log records across 64-
+    and 128-byte boundaries) and its driver never splits a write by page; a
+    24C128/24C256, with 64-byte pages, would wrap those writes and scramble the
+    timer slots on every restart, which real units do not show.  So the part
+    is modelled without page wrap, as an FRAM or a 24Cxx with 256-byte pages
+    behaves for these writes.  The C/E writes it a byte at a time."""
     from .periph.n32g45x import I2cEeprom
     i2c = emu.machine.bus.peripherals.get("I2C1")
     if i2c is None or 0x50 in i2c.devices:
         return
     path = os.path.join(emu.state_dir, "eeprom.bin") if emu.state_dir else None
-    i2c.devices[0x50] = dev = I2cEeprom(0x50, 32768, 2, 64, path)
+    i2c.devices[0x50] = dev = I2cEeprom(0x50, CONTROL_EEPROM_SIZE, 2, CONTROL_EEPROM_SIZE, path)
     emu.persist.append(dev)
 
 
