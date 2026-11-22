@@ -49,3 +49,95 @@ def test_info_reports_the_header(tmp_path):
     assert info["ota_header"]["board"] == "PMU" and info["ota_header"]["version"] == 309
     assert info["reset"] == "0x80081ad"
     assert "VNSEMINI-0" in info["device_types"]
+
+
+class _Board:
+    """What a profile's setup hook sees of the emulator."""
+
+    def __init__(self, state_dir=None, soc="n32g45x"):
+        from marsemu.core.machine import Machine
+        from marsemu.periph import n32g45x, stm32
+        self.machine = Machine()
+        if soc == "stm32g4":
+            stm32.build_g4(self.machine, uid=bytes(12))
+        else:
+            n32g45x.build(self.machine)
+        self.state_dir = state_dir
+        self.persist = []
+
+
+def test_venus_control_eeprom_keeps_a_whole_settings_block():
+    """The Venus E 3.0 writes its 152-byte settings block (timer slots
+    included) at 0x300 in one transaction; all of it reads back."""
+    from marsemu.profiles import control_eeprom
+    b = _Board()
+    control_eeprom(b)
+    ee = b.machine.bus.get("I2C1").devices[0x50]
+    block = bytes(range(1, 153))
+    ee.start(False)
+    for x in (0x03, 0x00) + tuple(block):
+        ee.write(x)
+    ee.stop()
+    ee.start(False)
+    ee.write(0x03), ee.write(0x00)
+    ee.start(True)
+    assert bytes(ee.read() for _ in range(152)) == block
+
+
+def test_venus_mini_settings_flash_survives_a_reset(tmp_path):
+    """The Mini's settings live in an SPI NOR flash on SPI1 (chip select PA4)."""
+    from marsemu.profiles import PROFILES
+    p = PROFILES["venus-mini"]
+    assert p.fc41d_power == ("A", 1) and p.fc41d_uart == "USART2"
+    b = _Board(str(tmp_path))
+    for fn in p.setup:
+        fn(b)
+    m = b.machine
+    spi, gpioa = m.bus.get("SPI1"), m.bus.get("GPIOA")
+
+    def txn(*data):
+        gpioa.write32(0x14, 1 << 4)                     # select
+        out = []
+        for x in data:
+            spi.write32(0x0C, x)
+            out.append(spi.read32(0x0C))
+        gpioa.write32(0x10, 1 << 4)                     # deselect
+        return out
+    txn(0x06)
+    txn(0x20, 0x00, 0xA0, 0x00)                         # erase the sector at 0xA000
+    txn(0x06)
+    txn(0x02, 0x00, 0xA0, 0x00, 0x46, 0x00)             # program two bytes
+    m.reset()
+    assert txn(0x03, 0x00, 0xA0, 0x00, 0, 0)[4:] == [0x46, 0x00]
+    for dev in b.persist:
+        dev.save()
+    assert (tmp_path / "spiflash.bin").read_bytes()[0xA000] == 0x46
+
+
+def test_venus_ce_settings_eeprom_on_the_stm32_i2c():
+    """The Venus C/E control (STM32G474) reads and writes its settings a byte
+    at a time on I2C1 at 0x50 with two address bytes; without the EEPROM model
+    an auto-created one-byte-address stand-in scrambled them (set_v=80 after a
+    restart)."""
+    from marsemu.periph.n32g45x import I2cEeprom
+    from marsemu.profiles import PROFILES
+    b = _Board(soc="stm32g4")
+    for fn in PROFILES["venus"].setup:
+        fn(b)
+    i2c = b.machine.bus.get("I2C1")
+    assert isinstance(i2c.devices[0x50], I2cEeprom)
+
+    def xfer(n, read=False, data=()):
+        i2c.write32(0x04, (0x50 << 1) | (read << 10) | (n << 16) | (1 << 13) | (1 << 25))
+        out = []
+        for x in data:
+            i2c.write32(0x28, x)
+        if read:
+            out = [i2c.read32(0x24) for _ in range(n)]
+        return out
+    xfer(3, data=(0x00, 0x2B, 156))                     # one byte at 0x002B
+    xfer(2, data=(0x00, 0x2B))
+    assert xfer(1, read=True) == [156]
+    b.machine.reset()
+    xfer(2, data=(0x00, 0x2B))
+    assert xfer(1, read=True) == [156]

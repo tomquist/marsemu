@@ -355,3 +355,52 @@ def test_broker_reconnect_does_not_drop_the_new_connection():
         assert f.mqtt[0].connected
     finally:
         b.close()
+
+
+def test_module_power_pin():
+    """The Venus E Mini switches the module's power with PA1: low turns the
+    module off (connections drop, no answers), high boots it afresh, so its
+    Wi-Fi comes up and is announced again after the MCU restarts."""
+    m, f, u = module()
+    gpio = m.bus.get("GPIOA")
+    f.power_from_gpio(gpio, 1)
+    f.power_on()
+    m.advance(5.0)
+    assert f.got_ip and b"+QSTASTAT:GOT_IP" in u.rx
+    f.on_tx(b'AT+QMTOPEN=0,"broker",8883\r\n')
+    m.advance(0.5)
+    assert f.mqtt[0].open
+    u.rx.clear()
+    # the MCU makes PA1 an output; it is low already, so only the mode changes
+    gpio.write32(0x00, (gpio.regs[0x00] & ~0xF0) | 0x20)
+    assert not f.powered and not f.got_ip and not f.mqtt
+    f.on_tx(b"AT+QVERSION\r\n")
+    m.advance(5.0)
+    assert u.rx == b""                                         # off: no answer, no URC
+    gpio.write32(0x10, 1 << 1)                                 # PA1 high
+    assert f.powered
+    m.advance(5.0)
+    assert b"ready" in u.rx and b"+QSTASTAT:GOT_IP" in u.rx
+    f.on_tx(b"AT+QVERSION\r\n")
+    assert b"+QVERSION:" in u.rx
+    # held low across an MCU reset: the reset releases the pin (pulled up), the module boots
+    gpio.write32(0x14, 1 << 1)
+    assert not f.powered
+    gpio.reset()
+    assert f.powered
+
+
+def test_spi_nor_flash_saves_only_after_a_change(tmp_path):
+    from marsemu.periph.n32g45x import SpiNorFlash
+    m = Machine()
+    n32g45x.build(m)
+    path = tmp_path / "spi.bin"
+    fl = SpiNorFlash(m, size=1 << 12, path=str(path))
+    fl.save()
+    assert not path.exists()
+    for cmd in ((0x06,), (0x02, 0, 0, 0, 7)):
+        for b in cmd:
+            fl.xfer(b)
+        fl._end()
+    fl.save()
+    assert path.read_bytes()[0] == 7

@@ -14,7 +14,7 @@ import json
 import logging
 import os
 from collections import deque
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from ..core.bus import Peripheral
 
@@ -182,11 +182,17 @@ class Gpio(Base):
         #: (buttons, open-drain status lines), so idle-high is the safe default
         self.float_level = 1
         self.watchers: List[Callable[[int, int], None]] = []
+        #: (pin, fn): ``fn(level)`` whenever what the MCU drives on ``pin``
+        #: changes: 0 or 1 as an output, None when released (an input), e.g.
+        #: on a reset; unlike :attr:`watchers` this sees mode changes too
+        self.drive_watchers: List[Tuple[int, Callable[[Optional[int]], None]]] = []
         super().__init__(machine, name, base)
 
     def reset(self):
+        before = self._drives()
         super().reset()
         self.regs.update({0x00: 0x44444444, 0x04: 0x44444444})
+        self._notify_drives(before)
 
     def mode(self, pin: int) -> int:
         cfg = self.regs.get(0x00 if pin < 8 else 0x04, 0)
@@ -194,6 +200,19 @@ class Gpio(Base):
 
     def pin_out(self, pin: int) -> int:
         return (self.regs.get(0x0C, 0) >> pin) & 1
+
+    def driven(self, pin: int) -> Optional[int]:
+        """The level the MCU drives on ``pin``, or None if it is an input."""
+        return self.pin_out(pin) if self.mode(pin) & 3 else None
+
+    def _drives(self):
+        return [self.driven(pin) for pin, _ in getattr(self, "drive_watchers", ())]
+
+    def _notify_drives(self, before) -> None:
+        for (pin, fn), old in zip(self.drive_watchers, before):
+            new = self.driven(pin)
+            if new != old:
+                fn(new)
 
     def _pid(self) -> int:
         odr = self.regs.get(0x0C, 0)
@@ -221,6 +240,7 @@ class Gpio(Base):
 
     def write32(self, off, v):
         old = self.regs.get(0x0C, 0)
+        drives = self._drives() if self.drive_watchers else None
         if off == 0x10:  # PBSC: set/reset
             new = (old | (v & 0xFFFF)) & ~(v >> 16)
             self.regs[0x0C] = new
@@ -234,6 +254,8 @@ class Gpio(Base):
                 if (new ^ old) >> pin & 1:
                     for w in self.watchers:
                         w(pin, (new >> pin) & 1)
+        if drives is not None:
+            self._notify_drives(drives)
 
     def set_input(self, pin: int, level: int) -> None:
         self.inputs[pin] = level & 1
@@ -1581,6 +1603,7 @@ class SpiNorFlash(SpiDevice):
         self.cmd = []
         self.wel = False
         self.selected = False
+        self.dirty = False
         if cs is not None:
             gpio, pin = cs
             gpio.watchers.append(lambda p, lvl: self._cs(lvl == 0) if p == pin else None)
@@ -1620,6 +1643,7 @@ class SpiNorFlash(SpiDevice):
             a = self._addr()
             page = a & ~0xFF
             self.mem[page | ((a + n - 5) & 0xFF)] &= b
+            self.dirty = True
         return 0xFF
 
     def _finish(self) -> None:
@@ -1633,12 +1657,15 @@ class SpiNorFlash(SpiDevice):
             a = self._addr() & ~(size - 1)
             self.mem[a:a + size] = b"\xff" * size
             self.wel = False
+            self.dirty = True
         elif op in (0xC7, 0x60) and self.wel:
             self.mem[:] = b"\xff" * len(self.mem)
             self.wel = False
+            self.dirty = True
         elif op == 0x02:
             self.wel = False
 
     def save(self) -> None:
-        if self.path:
+        if self.path and self.dirty:
             open(self.path, "wb").write(self.mem)
+            self.dirty = False

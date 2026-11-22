@@ -359,7 +359,7 @@ def configure_self_consumption(device, ct_mac: str = DEFAULT_CT_MAC, say=None) -
     def subscribed(t):
         topics.append(t)
         if len(topics) == 1:
-            device.sim.after(2.0, setup)
+            device.sim.after(getattr(device, "SETUP_DELAY_S", 2.0), setup)
     e.on("mqtt_subscribe", subscribed)
 
 
@@ -519,6 +519,9 @@ def cmd_venus3(args) -> int:
 
     e.on("mqtt_publish", lambda t, p: log.info("MQTT> %s %s", t, p[:200]))
     announce_identity(e, args.ble_mac, say=lambda text: print(f"[{v.time:8.1f}] {text}", flush=True))
+    # the CPU's own reset warning is silenced with the rest of emu.cpu
+    e.machine.reset_hooks.append(lambda: print(
+        f"[{v.time:8.1f}] control MCU reset ({e.machine.last_reset or 'reset'})", flush=True))
     if args.at:
         e.on("at", lambda line: print(f"[{v.time:8.1f}] AT  {line}", flush=True))
         e.on("at_rx", lambda line, ms=None: print(
