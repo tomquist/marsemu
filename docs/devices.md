@@ -325,6 +325,36 @@ The firmware reports as HMI-1 whatever the image's name: an empty EEPROM is
 the factory default. Its debug console is on LIN-A (`--serve-uart LINA:PORT`:
 `codeshow`, `prtshow`, `runprt`, `reset`, `buildt`).
 
+### MQTT commands
+
+`tools/command_sweep.py` sent every `cd=0`..`120` (bare and with `p1=1`) to
+HMI-1 132 in the emulator, each in a fork of the booted device, and recorded
+what the firmware published and which `cd=1` fields changed. Replies go to
+`marstek_energy/HMI-1/device/<id>/ctrl`. The commands that do something:
+
+| Command | Reply | What it does |
+|---|---|---|
+| `cd=1` | the status (`pv1_v`, …, `pl`, `gc`, `ht`, `wf`, `ct_*`) | read |
+| `cd=8,p1=W` | `cmd=8 ok` | output limit `pl` (W); 0 stops feeding in |
+| `cd=10` | `cmd=10 ok` | factory reset: reboots (a watchdog reset) with `pl` back to 800 and `wf` 0 |
+| `cd=11,p1=0/1/2` | `cmd=11 ok` | mode `mpt_m`: 0 default, 1 B2500 boost, 2 reverse-current protection (no output without a meter) |
+| `cd=12` | `log1=…` to `log36=…` in four messages | the event log, seven fields per entry (`-1` empty) |
+| `cd=13` | none | reboot; settings stay |
+| `cd=22,p1=1/0` | `cmd=22 ok` | grid-connection ban `gc`: 1 opens the relay (`rel_s=0`, `pv*_s=0`, `err_t=1062`) |
+| `cd=23` | `ct_f:…,ct_t:…,ct_mac:…,ct_c:…,ct_r:…,ct_p:…` | the CT meter settings |
+| `cd=24,p1=1/0` | `cmd=24 ok` | sets `ht` (meaning not known) |
+| `cd=26` | `ip:…,gate:…,mask:…,dns:…` | the network settings |
+
+Everything else up to `cd=120` changes nothing visible. The meanings come
+from the emulator only; `ht`, `wf` and the log fields want a real device to
+confirm.
+
+```bash
+python tools/command_sweep.py HMI.bin --cd 0-40 --jobs 4 > sweep.jsonl
+python tools/command_sweep.py HMI.bin --payload "cd=8,p1=300;cd=13"   # a sequence in one fork
+python tools/command_sweep.py --render sweep.jsonl
+```
+
 ## Supported firmware
 
 `marsemu profiles` lists the board profiles; the right one is detected from the
