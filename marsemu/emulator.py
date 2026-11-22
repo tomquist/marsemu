@@ -91,6 +91,9 @@ class Emulator:
         p = self.profile
         #: device type the board is "factory programmed" as (e.g. HMA-1)
         self.device_type = device_type
+        if p.soc == "f2803x":
+            self._init_c28x(network, fc41d, state_dir, uid, watchdog, fc41d_uart, external_module, idle_skip)
+            return
         self.machine = m = Machine(hz=p.hz, flash_size=p.flash_kb * 1024, sram_size=max(p.sram_kb, 256) * 1024,
                                    cpi=cpi or p.cpi)
         self.uid = uid or hashlib.sha1(image).digest()[:12]
@@ -161,6 +164,61 @@ class Emulator:
             self.bind_fc41d(uart)
         log.info("profile %s: %s", p.name, p.description)
 
+    def _init_c28x(self, network, fc41d, state_dir, uid, watchdog, fc41d_uart, external_module, idle_skip):
+        """A TI C2000 device (F2803x): interpreted C28x core + CLA, the SoC
+        peripherals, the FC41D on its SCI and an EEPROM on I2C."""
+        from .c28x import f2803x
+        from .c28x.machine import C28xMachine
+        from .periph.n32g45x import I2cEeprom
+        p = self.profile
+        image = self.image
+        self.machine = m = C28xMachine(hz=p.hz)
+        f2803x.build(m)
+        if not os.environ.get("MARSEMU_PURE_PYTHON"):
+            from .c28x.cpu import accelerate
+            if not accelerate(m.cpu):
+                log.warning("the native C28x core is not built (no C compiler at install time?): "
+                            "this device runs at a small fraction of real time")
+        self.uid = uid or hashlib.sha1(image).digest()[:12]
+        self.state_dir = state_dir
+        self.persist: List = []
+        #: word address the application is linked for
+        self.base = f2803x.FLASH_BASE
+        m.entry = self.base
+        self._load_flash()
+        self.consoles: Dict[str, List[str]] = {}
+        m.consoles.append(self._console)
+        self.console_listeners: List[Callable[[str, str], None]] = []
+        self.taps = {}
+        for n in ("SCIA", "LINA"):
+            tap = UartTap(self, n)
+            m.get(n).device = tap
+            self.taps[n] = tap
+            self.consoles[n] = []
+        self.fc41d = Fc41d(m, network or Network(), fc41d or Fc41dConfig())
+        self._load_module_state()
+        self.external = None
+        if external_module:
+            from .extmodule import ExternalModule
+            self.external = ExternalModule(self, external_module)
+        self.autodetect_fc41d = False
+        uart = fc41d_uart or p.fc41d_uart
+        self._fc41d_uart = uart
+        # settings EEPROM (24C32 at 0x50)
+        path = os.path.join(state_dir, "eeprom.bin") if state_dir else None
+        self.eeprom = I2cEeprom(0x50, 4096, 2, 32, path)
+        m.get("I2CA").devices[0x50] = self.eeprom
+        self.persist.append(self.eeprom)
+        m.sysctrl.wd_enabled = watchdog
+        for fn in p.setup:
+            fn(self)
+        if idle_skip:
+            self.delay_loops = m.install_delay_loops(self.base, self.base + len(image) // 2)
+        m.reset()
+        if uart:
+            self.bind_fc41d(uart)
+        log.info("profile %s: %s", p.name, p.description)
+
     # ----------------------------------------------------------------- fc41d
     def bind_fc41d(self, uart: str, pending: bytes = b"") -> None:
         u = self.machine.bus.get(uart)
@@ -222,6 +280,13 @@ class Emulator:
 
     def _load_flash(self) -> None:
         m = self.machine
+        if self.profile.soc == "f2803x":
+            flash_path, _ = self._paths()
+            if flash_path and os.path.exists(flash_path):
+                m.load_flash(open(flash_path, "rb").read())
+                log.info("restored flash state from %s", flash_path)
+            m.load_flash(self.image, (self.base - m.flash_base) * 2)
+            return
         flash_path, _ = self._paths()
         if flash_path and os.path.exists(flash_path):
             data = open(flash_path, "rb").read()[: m.flash_size]

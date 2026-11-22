@@ -473,6 +473,22 @@ def cmd_run(args) -> int:
     return 0
 
 
+def c28x_image_info(path: str, raw: bytes, prof) -> dict:
+    """``marsemu info`` for a TI C2000 image: its strings are one character
+    per 16-bit word, so they are searched in the low bytes."""
+    from .c28x.f2803x import FLASH_BASE
+    text = raw[0::2]
+    entry = struct.unpack_from("<HH", raw, 0)
+    names = sorted(set(re.findall(rb"HMI-\d+", text)))
+    return {
+        "file": path, "size": len(raw), "profile": prof.name, "cpu": "TMS320C28x (+ CLA)",
+        "linked_at": hex(FLASH_BASE), "entry": hex(((entry[0] & 0x3F) << 16) | entry[1]),
+        "fc41d": b"AT+Q" in text, "device_types": [n.decode() for n in names],
+        "ble_name": sorted(set(m.decode() for m in re.findall(rb"AT\+QBLENAME=([^\r\n\x00]{1,24})", text))),
+        "mqtt_prefixes": sorted(set(m.decode() for m in re.findall(rb"(hame_energy|marstek_energy)/", text))),
+    }
+
+
 def image_info(path: str) -> dict:
     """What ``marsemu info`` prints for one image: profile, load address,
     device types, BLE name and MQTT prefixes."""
@@ -483,6 +499,8 @@ def image_info(path: str) -> dict:
     prof = detect(img, path)
     sp, rst = struct.unpack_from("<II", img, 0)
     base = load_base(img)
+    if prof.soc == "f2803x":
+        return c28x_image_info(path, raw, prof)
     info = {
         "file": path, "size": len(raw), "profile": prof.name, "linked_at": hex(base),
         "initial_sp": hex(sp), "reset": hex(rst), "fc41d": b"AT+Q" in img,
