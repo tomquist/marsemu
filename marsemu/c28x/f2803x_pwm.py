@@ -539,8 +539,9 @@ class Epwm(C28xPeripheral):
 
 
 class Ecap(C28xPeripheral):
-    """eCAP1 (0x6A00).  In APWM mode its counter is modelled; capture inputs
-    are events the plant raises with :meth:`capture`."""
+    """eCAP1 (0x6A00): the free-running counter, and capture of the edges the
+    plant raises on its input with :meth:`edge` (polarity per stage, counter
+    reset per stage, continuous wrap at STOP_WRAP)."""
 
     reg_names = {0x00: "TSCTR", 0x01: "TSCTR_H", 0x02: "CTRPHS", 0x03: "CTRPHS_H", 0x04: "CAP1", 0x05: "CAP1_H",
                  0x06: "CAP2", 0x07: "CAP2_H", 0x08: "CAP3", 0x09: "CAP3_H", 0x0A: "CAP4", 0x0B: "CAP4_H",
