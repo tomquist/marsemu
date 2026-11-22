@@ -1,7 +1,7 @@
 # Interfaces
 
 How to reach the emulated device from other software. The whole-device
-commands (`venus3`, `venusd`, `venusa`, `venusmini`, `jupiter`, `b2500`) and `run` take
+commands (`venus3`, `venusd`, `venusa`, `venusce`, `venusmini`, `jupiter`, `b2500`) and `run` take
 most of these options; `marsemu COMMAND --help` lists them.
 
 ## MQTT broker (hm2mqtt, hame-relay, mosquitto)
@@ -14,7 +14,26 @@ mosquitto_pub -t 'marstek_energy/HMA-1/App/<id>/ctrl' -m 'cd=1'          # poll 
 ```
 
 MQTT sessions go to the broker with their original topics and client IDs, so
-tools that talk to the cloud topics work unchanged. `run --mqtt cloud`
+tools that talk to the cloud topics work unchanged. Once the firmware has
+subscribed, marsemu says who it is and what hm2mqtt needs to reach it:
+
+```text
+[  37.5] MQTT: VNSE3-0, topic id 3b70…a0fc, BLE MAC c8478c000042; for hm2mqtt: DEVICE_0=VNSE3-0:3b70…a0fc
+```
+
+The topic id derives from the BLE MAC, and every emulated device has the same
+one unless told otherwise. To put several devices on one broker (and one
+hm2mqtt, one Home Assistant), give each its own `--ble-mac`, e.g.
+`c8:47:8c:00:00:42`, `…:43`; otherwise their topics, and the unique ids of the
+entities hm2mqtt makes for them, collide.
+
+Local APIs the firmware serves (the Venus Open API on UDP 30000, say) need
+`--sockets real`: the device's UDP services then listen on this host, at
+`--listen-offset` above their own port (`--listen-offset 10000`: 40000), and
+their replies go back to whoever asked.
+
+`kill` (SIGTERM) stops every command the way Ctrl-C does: the state in
+`--state-dir` is saved, and a BMS running in its own process stops with it. `run --mqtt cloud`
 connects to the vendor's broker the firmware asked for, with the certificates
 it uploaded, under the identity you give with `--uid`, `--wifi-mac` and
 `--ble-mac`. It only starts with all three and `--confirm-own-device`, which
@@ -186,9 +205,15 @@ ble 730623030154            BLE write
 wifi-down / wifi-up         lose / regain the access point
 gpio B14 0                  drive an input (a button)
 adc ADC1 3 1800             change a sensor reading
+meter 500,-200,1000         CT002/CT003: grid power the meter measures (+ import)
+meter-plug off              CT003: unplug the utility meter's P1 cable (on: plug it back)
 at                          last AT transcript lines
 status
 ```
+
+A CT002/CT003 starts at 0 W on every phase; `--meter-power 500,-200,1000` sets
+what it measures from the start. To drive `-i` from a script, feed stdin from a
+FIFO: `mkfifo ctl; tail -f ctl | marsemu run … -i`, then `echo "meter 300" > ctl`.
 
 ```bash
 marsemu run FIRMWARE.bin --gdb 3333 --no-watchdog

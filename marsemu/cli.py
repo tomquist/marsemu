@@ -5,6 +5,7 @@ import argparse
 import json
 import logging
 import re
+import signal
 import socket
 import struct
 import sys
@@ -98,6 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--trace-irq", action="store_true", help="log exception entry/exit")
     r.add_argument("--coverage", metavar="FILE", help="write executed basic blocks to FILE at exit")
     r.add_argument("--json-log", metavar="FILE", help="write device events (MQTT, BLE, HTTP, AT) as JSON lines")
+    r.add_argument("--meter-power", metavar="A[,B,C]",
+                   help="CT002/CT003: grid power the meter measures per phase at start, W (+ import); "
+                        "change it with 'meter' under --interactive")
     r.add_argument("--gpio", action="append", default=[], metavar="PORTPIN=LEVEL", help="force a GPIO input, e.g. B14=0")
     r.add_argument("--adc", action="append", default=[], metavar="ADCn:CH=VALUE", help="ADC reading, e.g. ADC1:3=1800")
     r.add_argument("--spi-flash", action="append", default=[], metavar="SPIn=FILE",
@@ -257,6 +261,8 @@ HELP = """commands:
   wifi-down | wifi-up      drop / restore the access point
   gpio <port><pin> <0|1>   drive a GPIO input, e.g. gpio B14 0
   adc <ADCn> <ch> <value>  set an ADC reading
+  meter <A>[,<B>,<C>]      CT002/CT003: grid power the meter measures per phase, W (+ import)
+  meter-plug <on|off>      CT003: plug the utility meter's P1 cable in or out
   at                       print the last 40 lines of the AT transcript
   status                   time, PC, resets, MQTT state
   quit"""
@@ -305,6 +311,20 @@ def interactive(emu: Emulator, stop_evt: threading.Event):
             elif cmd == "adc":
                 a, ch, v = parts[1], int(parts[2].split()[0]), int(parts[2].split()[1])
                 emu.machine.bus.get(a.upper()).values[ch] = v
+            elif cmd == "meter":
+                watts = parse_phases(" ".join(parts[1:]))
+                meter = getattr(emu, "ct_meter", None)
+                if meter is None:
+                    print("this device has no meter (CT002/CT003 images only)")
+                    continue
+                mod.post(lambda: meter.set_power(*watts))
+            elif cmd == "meter-plug":
+                meter = getattr(emu, "ct_meter", None)
+                if not hasattr(meter, "set_connected"):
+                    print("only a CT003 (P1 reader) has a meter cable to unplug")
+                    continue
+                on = parts[1].lower() in ("on", "1", "in")
+                mod.post(lambda: meter.set_connected(on))
             elif cmd == "at":
                 print(mod.dump_transcript(40))
             elif cmd == "status":
@@ -318,8 +338,39 @@ def interactive(emu: Emulator, stop_evt: threading.Event):
             print(f"bad command: {e}")
 
 
+def parse_phases(spec: str):
+    """``"500"`` or ``"500,-200,1000"`` (or space separated) -> (A, B, C) in W."""
+    watts = [float(x) for x in spec.replace(",", " ").split()]
+    if not 1 <= len(watts) <= 3:
+        raise ValueError("give 1 to 3 phase powers, e.g. 500,-200,1000")
+    return tuple(watts + [0.0] * (3 - len(watts)))
+
+
 DEFAULT_WIFI_MAC = "c8:47:8c:00:00:01"
 DEFAULT_BLE_MAC = "c8:47:8c:00:00:02"
+
+#: device types for which hm2mqtt derives the MQTT topic id from the MAC
+#: itself (its DeviceManager's encryptedDeviceTypes); for the others it takes
+#: the topic id as configured
+HM2MQTT_MAC_TYPES = ("HMA", "HMF", "HMK", "HMJ")
+
+
+def announce_identity(emu: Emulator, ble_mac: str, say=print) -> None:
+    """Once the firmware subscribes to its command topic, say who it is on
+    MQTT: device type, topic id and BLE MAC, and the device line hm2mqtt
+    needs to talk to it (``DEVICE_0=<type>:<id>``)."""
+    seen = set()
+
+    def subscribed(topic: str) -> None:
+        parts = topic.split("/")
+        if len(parts) < 4 or parts[2] != "App" or parts[1] in seen:
+            return
+        dtype, topic_id = parts[1], parts[3]
+        seen.add(dtype)
+        mac = ble_mac.replace(":", "").lower()
+        hm_id = mac if dtype.split("-")[0].upper() in HM2MQTT_MAC_TYPES else topic_id
+        say(f"MQTT: {dtype}, topic id {topic_id}, BLE MAC {mac}; for hm2mqtt: DEVICE_0={dtype}:{hm_id}")
+    emu.on("mqtt_subscribe", subscribed)
 
 VENDOR_CLOUD_TERMS = """\
 --mqtt cloud and --http real connect the emulated device to the manufacturer's
@@ -390,8 +441,14 @@ def cmd_run(args) -> int:
         fl = SpiNorFlash(m, path=path)
         m.bus.get(bus.upper()).device = fl
         flashes.append(fl)
+    if args.meter_power:
+        if getattr(emu, "ct_meter", None) is None:
+            print("marsemu: --meter-power: this image has no meter (CT002/CT003 only)", file=sys.stderr)
+            return 2
+        emu.ct_meter.set_power(*parse_phases(args.meter_power))
     printer = EventPrinter(emu, args)
     printer.attach()
+    announce_identity(emu, args.ble_mac, say=lambda text: printer.out("DEVICE", text))
     if args.trace_irq:
         m.exc_trace = True
         logging.getLogger("emu.cpu").setLevel(logging.DEBUG)
@@ -548,12 +605,29 @@ def main(argv=None) -> int:
         parser.print_help()
         return 0
     args = parser.parse_args(argv)
+    previous = _stop_on_sigterm()
     try:
         return _dispatch(args)
     except (FileNotFoundError, IsADirectoryError, PermissionError) as e:
         if not e.filename:
             raise
         parser.exit(2, f"marsemu: error: {e.strerror}: {e.filename}\n")
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+
+
+def _stop_on_sigterm():
+    """Stop on SIGTERM (``kill``, a supervisor, a test harness) the way Ctrl-C
+    stops: every command then saves its state and stops its child processes
+    on the way out, instead of dying where it stands.  Returns the handler it
+    replaced, or None where signals can't be handled (not the main thread)."""
+    def stop(signum, frame):
+        raise KeyboardInterrupt
+    try:
+        return signal.signal(signal.SIGTERM, stop)
+    except ValueError:
+        return None
 
 
 def _dispatch(args) -> int:
@@ -563,7 +637,7 @@ def _dispatch(args) -> int:
         return cmd_info(args)
     if args.cmd == "ui":
         return cmd_ui(args)
-    if args.cmd in ("venus3", "venusd", "venusa", "jupiter", "venusmini", "b2500"):
+    if args.cmd in ("venus3", "venusd", "venusa", "venusce", "jupiter", "venusmini", "b2500"):
         from .plant.venus3_cli import cmd_venus3
         return cmd_venus3(args)
     if args.cmd == "decode-bus":

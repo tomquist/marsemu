@@ -252,7 +252,7 @@ class Network:
             so.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 so.bind(("127.0.0.1", port))
-            except OSError as e:
+            except (OSError, OverflowError) as e:   # OverflowError: port + offset outside 0-65535
                 log.warning("cannot bind UDP %d: %s", port, e)
                 return
             s.conn = so
@@ -276,10 +276,10 @@ class Network:
                     dest = (extra[0].strip('"'), int(extra[1]))
                 except ValueError:
                     pass
-            if self.udp_handler is not None:
+            if self.udp_handler is not None and self.udp_handler(s, data, dest) is not False:
                 # in-process peer (e.g. a CT002/CT003 emulator); it answers by
-                # calling udp_reply()
-                self.udp_handler(s, data, dest)
+                # calling udp_reply().  A handler returns False for datagrams
+                # that aren't for it (a Local API reply, say): those go on below.
                 return
             fwd = self.udp_forward.get(dest[1])
             if fwd is not None and s.conn is not None:
