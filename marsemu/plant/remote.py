@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+import signal
 import traceback
 from typing import Any, Callable, List, Optional
 
@@ -24,7 +25,15 @@ from .canbus import Frame, Node
 log = logging.getLogger(__name__)
 
 
-def _child(conn, build: Callable, args: tuple, can_periph: str) -> None:
+def _child(conn, build: Callable, args: tuple, can_periph: str, parent_end=None) -> None:
+    # The fork inherits the parent's end of the pipe: closed here, so that the
+    # parent dying (SIGKILL, a crash) ends recv() with EOFError instead of
+    # leaving this process blocked in it for good.
+    if parent_end is not None:
+        parent_end.close()
+    # Ctrl-C reaches the whole process group; the parent stops this MCU itself
+    # ("stop"), after it has saved its state, rather than it dying mid-slice.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     try:
         emu, sync = build(*args)
         m = emu.machine
@@ -33,7 +42,10 @@ def _child(conn, build: Callable, args: tuple, can_periph: str) -> None:
         can.tx_listeners.append(lambda i, d, x: out.append((emu.time, i, bytes(d), x)))
         conn.send(("ready", None))
         while True:
-            msg = conn.recv()
+            try:
+                msg = conn.recv()
+            except EOFError:        # the parent is gone
+                return
             if msg[0] == "stop":
                 emu.save_state()
                 conn.send(("stopped", None))
@@ -71,8 +83,9 @@ class RemoteMcu(Node):
         self._pending: List[tuple] = []
         ctx = mp.get_context("fork")
         self.conn, child = ctx.Pipe()
-        self.proc = ctx.Process(target=_child, args=(child, build, args, can_periph), daemon=True)
+        self.proc = ctx.Process(target=_child, args=(child, build, args, can_periph, self.conn), daemon=True)
         self.proc.start()
+        child.close()
         msg = self.conn.recv()
         if msg[0] != "ready":
             raise RuntimeError(f"{name} failed to start:\n{msg[1]}")
@@ -82,12 +95,19 @@ class RemoteMcu(Node):
         self._pending.append((f.t, f.ident, f.data, f.ext))
 
     def start(self, target: float) -> None:
-        self.conn.send(("run", target, self._pending, self.state() if self.state else None))
+        try:
+            self.conn.send(("run", target, self._pending, self.state() if self.state else None))
+        except (BrokenPipeError, ConnectionResetError):
+            raise RuntimeError(f"{self.name} exited (exit code {self.proc.exitcode})") from None
         self._pending = []
         self._busy = True
 
     def finish(self) -> None:
-        msg = self.conn.recv()
+        try:
+            msg = self.conn.recv()
+        except EOFError:
+            self._busy = False
+            raise RuntimeError(f"{self.name} exited (exit code {self.proc.exitcode})") from None
         self._busy = False
         if msg[0] == "error":
             raise RuntimeError(f"{self.name} crashed:\n{msg[1]}")
