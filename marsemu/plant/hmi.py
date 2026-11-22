@@ -136,6 +136,11 @@ class HmiPlant:
         self._ac_t0 = self._t
         self.ac_w = 0.0          # AC power, averaged over the last report interval
         self.ecap = m.get("ECAP1")
+        #: what each ADC channel reads; mid-scale where nothing is modelled
+        self._adc_vals = [2048] * 16
+        self._adc_vals[CH_FB1] = self._adc_vals[CH_FB2] = int(83.2 / FB_V_PER_COUNT)
+        self._adc_vals[CH_PE] = 52
+        self._adc_cyc = -1
         m.adc.source = self._adc
         m.adc.temp_raw = self._temp_raw(ambient_c)
         m.gpio.listeners.append(self._gpio)
@@ -218,24 +223,25 @@ class HmiPlant:
         return f2803x.temp_raw(c)
 
     def _adc(self, ch: int) -> int:
-        if ch == CH_PV1_V or ch == CH_PV1_I:
-            self._advance()
-        if ch == CH_PV1_V:
-            return int(self.inputs[0].v / PV_V_PER_COUNT)
-        if ch == CH_PV2_V:
-            return int(self.inputs[1].v / PV_V_PER_COUNT)
-        if ch == CH_PV1_I:
-            return int(self.inputs[0].i / PV_A_PER_COUNT)
-        if ch == CH_PV2_I:
-            return int(self.inputs[1].i / PV_A_PER_COUNT)
-        if ch == CH_GRID_P or ch == CH_GRID_N:
-            half = GRID_COUNTS_PER_V * self.grid_now() / 2
-            return int(2048 + half if ch == CH_GRID_P else 2048 - half)
-        if ch == CH_FB1 or ch == CH_FB2:
-            return int(83.2 / FB_V_PER_COUNT)
-        if ch == CH_PE:
-            return 52
-        return 2048
+        # a sequence converts its channels back to back at one instant:
+        # work the plant out once per sequence
+        cyc = self.clock.cycles
+        if cyc != self._adc_cyc:
+            self._adc_cyc = cyc
+            self._refresh_adc()
+        return self._adc_vals[ch]
+
+    def _refresh_adc(self) -> None:
+        self._advance()
+        v = self._adc_vals
+        a, b = self.inputs
+        v[CH_PV1_V] = int(a.v / PV_V_PER_COUNT)
+        v[CH_PV2_V] = int(b.v / PV_V_PER_COUNT)
+        v[CH_PV1_I] = int(a.i / PV_A_PER_COUNT)
+        v[CH_PV2_I] = int(b.i / PV_A_PER_COUNT)
+        half = GRID_COUNTS_PER_V * self.grid_now() / 2
+        v[CH_GRID_P] = int(2048 + half)
+        v[CH_GRID_N] = int(2048 - half)
 
     def status(self) -> dict:
         self._advance()

@@ -29,6 +29,7 @@ _EXPORTS = {
     "VenusA": ".plant.venusa",
     "Jupiter": ".plant.jupiter",
     "VenusCE": ".plant.venusce",
+    "Hmi": ".plant.hmi",
     "LfpPack": ".plant.battery",
     "House": ".plant.venus3_cli",
     "CtMeter": ".plant.venus3_cli",
