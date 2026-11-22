@@ -77,6 +77,8 @@ class Machine:
         self.idcode = 0x10036414
         self.consoles: List[Callable[[str, str], None]] = []
         self.reset_hooks: List[Callable[[], None]] = []
+        #: what caused the last system reset ("SYSRESETREQ", "IWDG", ...), None before one
+        self.last_reset: Optional[str] = None
         self.slice_hooks: List[Callable[[], None]] = []
         self.stop_reason: Optional[str] = None
         self._stop = False
@@ -665,6 +667,7 @@ class Machine:
             if self._reset_req:
                 why, self._reset_req = self._reset_req, None
                 log.warning("system reset (%s) at t=%.3fs", why, clock.seconds)
+                self.last_reset = why
                 self.reset()
             clock.run_due()
             for h in self.slice_hooks:

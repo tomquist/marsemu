@@ -261,6 +261,13 @@ settings record at 0x0803F000 the way the factory does, and the plant keeps
 the SOC there. Which ADC channel carries which signal depends on the build;
 `analysis/b2500.py` finds out from the image.
 
+**Commands right after the subscription.** For 3 s after it subscribes to
+its command topic, the firmware (seen in HMJ-2 110 and 116) holds an incoming
+command and then drops it, so a `cd=10` (restart), `cd=1` or `cd=27` sent
+within that time is lost, as it would be on a real unit. The setup
+(`--no-setup` turns it off) waits 5 s for that reason. The CLI prints a line
+when the MCU restarts.
+
 **Extension packs.** `--extension-packs 1|2` adds emulated extension
 batteries on the UART5 bus. The firmware reports them like real ones
 (connected flags, SOC averaged over all packs, energy summed, each pack's
