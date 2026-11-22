@@ -57,18 +57,21 @@ CH_GRID_P, CH_GRID_N = 6, 14      # A6, B6
 CH_FB1, CH_FB2 = 7, 8             # A7, B0
 CH_PE = 10                        # B2
 RELAY_GPIO = 21
+#: conversion noise, +/- counts
+ADC_NOISE = 2
 
 
 class Flyback:
     """One PV input: array, input capacitor and a DCM flyback."""
 
-    def __init__(self, array: PvArray, epwms, c_in: float = 2.0e-3, l_mag: float = 0.6e-6,
-                 f_sw: float = 100e3, efficiency: float = 0.955):
+    def __init__(self, array: PvArray, epwms, c_in: float = 2.0e-3, l_mag: float = 1.5e-6,
+                 efficiency: float = 0.955, hz: float = 60e6):
         self.array = array
         self.epwms = epwms
         self.c_in = c_in
         self.l_mag = l_mag
-        self.f_sw = f_sw
+        #: ePWM time base clock (SYSCLKOUT)
+        self.hz = hz
         self.efficiency = efficiency
         self.v = array.voc if array.isc > 0 else 0.0
         self.i = 0.0          # converter input current (switching-period average), A
@@ -76,12 +79,14 @@ class Flyback:
         self.energy = 0.0     # J drawn since start, for averages
 
     def conductance(self) -> float:
-        """Input current per volt the converter draws now: sum D^2 T / 2L."""
+        """Input current per volt the converter draws now: each phase stores
+        (V t_on)^2 / 2L a period, so draws V D^2 T / 2L on average.  The
+        firmware sets period and on-time both (variable frequency)."""
         g = 0.0
         for e in self.epwms:
             d = e.duty("A")
             if d > 0:
-                g += d * d / (2 * self.l_mag * self.f_sw)
+                g += d * d * e.period_cycles() / (self.hz * 2 * self.l_mag)
         return g
 
     def step(self, dt: float, g: float) -> None:
@@ -130,8 +135,8 @@ class HmiPlant:
         self.ambient_c = ambient_c
         self.arrays = [PvArray(p, voc=v) for p, v in zip(pv, voc)]
         ep = m.epwm
-        self.inputs: List[Flyback] = [Flyback(self.arrays[0], (ep[1], ep[2])),
-                                      Flyback(self.arrays[1], (ep[3], ep[4]))]
+        self.inputs: List[Flyback] = [Flyback(self.arrays[0], (ep[1], ep[2]), hz=m.clock.hz),
+                                      Flyback(self.arrays[1], (ep[3], ep[4]), hz=m.clock.hz)]
         self.relay = False
         self._t = self.clock.seconds
         self._phase0 = 0.0       # grid phase at clock 0, rad
@@ -144,6 +149,7 @@ class HmiPlant:
         self._adc_vals[CH_FB1] = self._adc_vals[CH_FB2] = int(83.2 / FB_V_PER_COUNT)
         self._adc_vals[CH_PE] = 52
         self._adc_cyc = -1
+        self._rng = 12345
         m.adc.source = self._adc
         m.adc.temp_raw = self._temp_raw(ambient_c)
         m.gpio.listeners.append(self._gpio)
@@ -238,13 +244,21 @@ class HmiPlant:
         self._advance()
         v = self._adc_vals
         a, b = self.inputs
-        v[CH_PV1_V] = int(a.v / PV_V_PER_COUNT)
-        v[CH_PV2_V] = int(b.v / PV_V_PER_COUNT)
-        v[CH_PV1_I] = int(a.i / PV_A_PER_COUNT)
-        v[CH_PV2_I] = int(b.i / PV_A_PER_COUNT)
+        n = self._noise
+        v[CH_PV1_V] = int(a.v / PV_V_PER_COUNT) + n()
+        v[CH_PV2_V] = int(b.v / PV_V_PER_COUNT) + n()
+        v[CH_PV1_I] = max(0, int(a.i / PV_A_PER_COUNT) + n()) if a.v > 0 else 0
+        v[CH_PV2_I] = max(0, int(b.i / PV_A_PER_COUNT) + n()) if b.v > 0 else 0
         half = GRID_COUNTS_PER_V * self.grid_now() / 2
-        v[CH_GRID_P] = int(2048 + half)
-        v[CH_GRID_N] = int(2048 - half)
+        v[CH_GRID_P] = int(2048 + half) + n()
+        v[CH_GRID_N] = int(2048 - half) + n()
+
+    def _noise(self) -> int:
+        """A few counts of conversion noise, as a real ADC has.  The firmware's
+        MPPT starts an input only once the string voltage is seen above its
+        running minimum; a perfectly steady reading never is."""
+        self._rng = (self._rng * 1103515245 + 12345) & 0x7FFFFFFF
+        return (self._rng >> 16) % (2 * ADC_NOISE + 1) - ADC_NOISE
 
     def status(self) -> dict:
         self._advance()

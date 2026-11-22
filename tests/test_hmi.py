@@ -35,16 +35,19 @@ class _Pwm:
     def duty(self, ch="A"):
         return self.d
 
+    def period_cycles(self):
+        return 600         # 100 kHz at 60 MHz
+
 
 def test_open_circuit_and_grid_sine():
     emu = _Emu()
     plant = HmiPlant(emu, pv=(300.0, 0.0), voc=(45.0, 45.0))
     m = emu.machine
-    assert plant._adc(CH_PV1_V) * PV_V_PER_COUNT == pytest.approx(45.0, abs=0.05)
+    assert plant._adc(CH_PV1_V) * PV_V_PER_COUNT == pytest.approx(45.0, abs=0.1)
     # a quarter period in: the grid at its positive peak, differential around mid-scale
     _advance(m, 0.005)
     p, n = plant._adc(CH_GRID_P), plant._adc(CH_GRID_N)
-    assert p + n == pytest.approx(4096, abs=2)
+    assert p + n == pytest.approx(4096, abs=6)
     assert (p - n) / GRID_COUNTS_PER_V == pytest.approx(230 * math.sqrt(2), rel=0.01)
 
 
