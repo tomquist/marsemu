@@ -1,7 +1,8 @@
-Survey: 64 images, 60 virtual seconds each, three at a time; images that had not subscribed by then were re-run for 150 s (`docs/survey_retry.jsonl`).
+Survey: 65 images, 60 virtual seconds each, three at a time; images that had not subscribed by then were re-run for 150 s (`docs/survey_retry.jsonl`).
 
 | Image | Profile | Result | MQTT topic | t(sub) | Resets | Speed |
 |---|---|---|---|---|---|---|
+| `Control/132/132_control_HMI-1_20251010160748845913037.bin` | hmi | MQTT subscribed | `marstek_energy/HMI-1/App/c8478c000002/ctrl` | 23.5 | 0 | 0.19× |
 | `Control/144/144_control_VNSE3-0_20251118161530cc2d80857.bin` | venus3 | MQTT subscribed | `marstek_energy/VNSE3-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 36.5 | 0 | 3.03× |
 | `Control/147/147_control_VNSD-0_202601281721320b2053125.bin` | venus3 | MQTT subscribed | `marstek_energy/VNSD-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 35.6 | 0 | 3.05× |
 | `Control/147/147_control_VNSE3-0_202601281724177c3442083.bin` | venus3 | MQTT subscribed | `marstek_energy/VNSE3-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 35.6 | 0 | 3.12× |

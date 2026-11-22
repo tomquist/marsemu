@@ -1,8 +1,9 @@
 # marsemu — run Marstek/Hame firmware in an emulator
 
 `marsemu` boots the original firmware images of Marstek (Hame) devices —
-B2500/Saturn, Venus, Jupiter and the CT002/CT003 meters — in a Cortex-M
-emulator, with a software **Quectel FC41D** Wi‑Fi/BLE module on the UART where
+B2500/Saturn, Venus, Jupiter, the Saturn M microinverter and the CT002/CT003
+meters — in a Cortex-M emulator (and, for the microinverter, a TI C28x one),
+with a software **Quectel FC41D** Wi‑Fi/BLE module on the UART where
 the real one sits. The firmware runs unmodified: it initialises its
 peripherals, uploads its certificates to the "module", joins "Wi‑Fi", connects
 to the "cloud" MQTT broker and answers BLE and MQTT commands for as long as you
@@ -123,7 +124,7 @@ marsemu ui HMJ-2/116/*.bin                  # then open http://127.0.0.1:8080/
 An X-ray view of the running device: its boards, chips and cells, the power
 flowing between them, every bus message, the registers the firmware writes,
 and controls for load, sun, faults and speed. Every device: B2500, Venus E 3.0, D, A
-and C/E, Venus E Mini, Jupiter C/E and C Plus, CT002/CT003. See
+and C/E, Venus E Mini, Jupiter C/E and C Plus, Saturn M (HMI), CT002/CT003. See
 [docs/ui.md](docs/ui.md).
 
 ## Quick start
@@ -183,6 +184,7 @@ To script it from Python, see [docs/library.md](docs/library.md).
 | Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
 | B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |
 | B2500 v1 (HMB) | `b2500 FIRMWARE` | the one MCU | front end, PV, switched outputs |
+| Saturn M microinverter (HMI) | `hmi FIRMWARE` | the one MCU (C28x CPU and CLA) | grid, relay, two PV strings, flyback power stage |
 | CT002/CT003, any other image | `run FIRMWARE` | the image | — |
 
 Every whole-device command takes `--load A[,B,C]` (house load per phase),

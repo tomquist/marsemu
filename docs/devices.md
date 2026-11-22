@@ -12,6 +12,7 @@ What marsemu runs for each device, and what it models around the real firmware.
 | Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
 | B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |
 | B2500 v1 (HMB) | `b2500 FIRMWARE` | the one MCU | front end, PV, switched outputs |
+| Saturn M microinverter (HMI) | `hmi FIRMWARE` | the one MCU (C28x CPU and CLA) | grid, relay, two PV strings, flyback power stage |
 | CT002/CT003, any other image | `run FIRMWARE` | the image | — |
 
 Every whole-device command takes `--load A[,B,C]` (house load per phase),
@@ -284,6 +285,94 @@ batteries on the UART5 bus. The firmware reports them like real ones
 (connected flags, SOC averaged over all packs, energy summed, each pack's
 voltage, current and temperatures in `cd=26`).
 
+## Saturn M microinverter (HMI)
+
+```mermaid
+flowchart LR
+    pv1["PV string 1"] --> fb1["flyback 1 (model)<br/>EPWM1/2"]
+    pv2["PV string 2"] --> fb2["flyback 2 (model)<br/>EPWM3/4"]
+    fb1 --> unf["unfolding bridge (model)<br/>GPIO17/18"]
+    fb2 --> unf
+    unf --> rel["relay (model)<br/>GPIO21"] --> grid["grid / house"]
+    mcu["TMS320F28035 (C28x + CLA)<br/>real firmware: grid-connect sequence,<br/>MPPT, 50 kHz current loop, FC41D, MQTT, BLE"]
+    mcu -.->|ePWM on-times| fb1
+    mcu -.->|ePWM on-times| fb2
+    grid -.->|ADC A6−B6, ECAP1 zero crossings| mcu
+```
+
+The HMI-1/2/5/6/9/350/500 run one TI TMS320F28035 that does everything, the
+power stage included: a C28x CPU at 60 MHz and its CLA, a floating-point
+coprocessor that runs the 50 kHz current loop. marsemu emulates both (`c28x`
+package: the CPU, the CLA, the F2803x peripherals and a native accelerator,
+see [internals](internals.md)) and models the board around them at the pins:
+
+* **Grid**: 230 V 50 Hz (`--grid-v`, `--grid-hz`) on the differential ADC pair
+  A6/B6, and its zero crossings on ECAP1, which the firmware times for
+  `grd_f`. The firmware tells 50 from 60 Hz, observes the grid, then closes
+  its relay (GPIO21, `rel_s`) as the CLA's PLL phase passes a set point.
+* **PV**: two strings with an exponential I-V curve (`--pv`, `--voc`) on
+  their input capacitors; voltage on A3/B4, current on A1/A0.
+* **Flybacks**: each input is a flyback whose input current follows the
+  on-time and the period the firmware gives EPWM1/2 and EPWM3/4 (it switches at
+  a variable frequency), so power flows only while it switches and the
+  firmware's own MPPT decides how much. The output goes through an unfolding
+  bridge to the grid; losses are a fixed efficiency. The magnetising
+  inductance (4 µH) and the input capacitance (2 mF) are estimates: with them
+  the firmware takes about 80 % and 50 % of what two 300 W and 250 W strings
+  offer, and its operating point swings by several volts every ~150 ms
+  instead of settling. A real device's values would fix that.
+* **ADC noise**: a few counts on every channel, as on the real board. The
+  firmware starts an input only once the string voltage reads above its
+  running minimum, which a noise-free reading never does.
+* **EEPROM**: the 24C32 on I2C (0x50) with the settings and energy counters,
+  kept in `--state-dir`.
+
+```bash
+marsemu hmi HMI-1/Control/132/*.bin --pv 300,250 -t 300
+```
+
+The relay closes within about 10 s of boot and both inputs feed in from about
+20 s; `cd=1` then reports the grid as 230.0 V and 50.00 Hz,
+`rel_s=1`, and around 350 W on the grid side for 550 W of PV.
+
+The whole device runs at about 0.2× real time; it needs the
+native accelerator, which `pip install` builds when a C compiler is present
+(the Docker images and the add-on have one).
+
+The firmware reports as HMI-1 whatever the image's name: an empty EEPROM is
+the factory default. Its debug console is on LIN-A (`--serve-uart LINA:PORT`:
+`codeshow`, `prtshow`, `runprt`, `reset`, `buildt`).
+
+### MQTT commands
+
+`tools/command_sweep.py` sent every `cd=0`..`120` (bare and with `p1=1`) to
+HMI-1 132 in the emulator, each in a fork of the booted device, and recorded
+what the firmware published and which `cd=1` fields changed. Replies go to
+`marstek_energy/HMI-1/device/<id>/ctrl`. The commands that do something:
+
+| Command | Reply | What it does |
+|---|---|---|
+| `cd=1` | the status (`pv1_v`, …, `pl`, `gc`, `ht`, `wf`, `ct_*`) | read |
+| `cd=8,p1=W` | `cmd=8 ok` | output limit `pl` (W); 0 stops feeding in |
+| `cd=10` | `cmd=10 ok` | factory reset: reboots (a watchdog reset) with `pl` back to 800 and `wf` 0 |
+| `cd=11,p1=0/1/2` | `cmd=11 ok` | mode `mpt_m`: 0 default, 1 B2500 boost, 2 reverse-current protection (no output without a meter) |
+| `cd=12` | `log1=…` to `log36=…` in four messages | the event log, seven fields per entry (`-1` empty) |
+| `cd=13` | none | reboot; settings stay |
+| `cd=22,p1=1/0` | `cmd=22 ok` | grid-connection ban `gc`: 1 opens the relay (`rel_s=0`, `pv*_s=0`, `err_t=1062`) |
+| `cd=23` | `ct_f:…,ct_t:…,ct_mac:…,ct_c:…,ct_r:…,ct_p:…` | the CT meter settings |
+| `cd=24,p1=1/0` | `cmd=24 ok` | sets `ht` (meaning not known) |
+| `cd=26` | `ip:…,gate:…,mask:…,dns:…` | the network settings |
+
+Everything else up to `cd=120` changes nothing visible. The meanings come
+from the emulator only; `ht`, `wf` and the log fields want a real device to
+confirm.
+
+```bash
+python tools/command_sweep.py HMI.bin --cd 0-40 --jobs 4 > sweep.jsonl
+python tools/command_sweep.py HMI.bin --payload "cd=8,p1=300;cd=13"   # a sequence in one fork
+python tools/command_sweep.py --render sweep.jsonl
+```
+
 ## Supported firmware
 
 `marsemu profiles` lists the board profiles; the right one is detected from the
@@ -300,6 +389,7 @@ started the way the bootloader would; full images run the bootloader first.
 | `jupiter` | Jupiter C/E (HMM/HMN), C Plus (JPLS-8H) | N32G45x | USART1 | reaches MQTT; whole device |
 | `venus-mini` | Venus E Mini (VNSEMINI) control, 309 | N32G45x | USART2 | reaches MQTT; whole device |
 | `ct00x` | CT002/CT003 (HME) | STM32F0-class | USART1 | reaches MQTT (the module claims the factory certificates) |
+| `hmi` | Saturn M microinverter (HMI-1/2/5/6/9/350/500), 132 | TMS320F28035 (C28x + CLA) | SCI-A | reaches MQTT (~22 s); whole device |
 | `aux` | BMS and other MCUs without an FC41D (N32) | – | – | boot; the Venus BMSes run fully with their front-end models |
 | `aux-g4` | STM32G474 inverter boards (Venus D/E 3.0/E Mini "micro") | – | – | boot; the Venus D/E 3.0 ones answer the control's CAN commands; Micro 270 (Mini) runs at about 1/40 of real time |
 
@@ -319,6 +409,8 @@ Per-image results are in [`STATUS.md`](STATUS.md), generated by
 | Venus E Mini DC/DC (no firmware) | the control's reply handler and battery management, including what it commands (on/off, charge and discharge permission and limits; units checked by their use) | medium–high |
 | Venus C/E power stage | the control firmware's ADC scaling and PWM mapping; component values estimated | medium |
 | B2500 ADC/PWM/DAC/GPIO mapping, settings record, SOC | disassembly, checked against the firmware's `cd=1` reports | high |
+| HMI ADC/ePWM/eCAP/GPIO mapping, grid scaling, grid-connect sequence, boot ROM IQmath tables | disassembly and the C2000 manuals, checked against the firmware's `cd=1` reports (230.0 V, 50.00 Hz) | high |
+| HMI flyback power stage (DCM model, inductance, input capacitance, efficiency) | estimates; the firmware's own MPPT closes the loop | **calibrate against a real device** |
 | Settings memories (Venus I2C EEPROM, Venus E Mini SPI flash), the Mini's module power switch (PA1) | the firmware's bus transactions and drivers, checked by restarting with `cd=28` / `cd=61,rst=1` | high (behaviour); the exact parts are not known |
 | Power dynamics (grid-connect delay, slew, filters, losses, converter dynamics) | estimates | **calibrate against a real device** |
 | Microinverter MPP tracking on the B2500 outputs | generic sweep + perturb-and-observe | medium |

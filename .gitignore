@@ -6,3 +6,4 @@ emu-state/
 *.bin
 *.egg-info/
 build/
+*.so

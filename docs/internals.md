@@ -45,6 +45,38 @@ Anything not modelled is a plain register file. Busy-wait loops on such
 registers are broken automatically (after 200 identical reads without a write
 the value is returned inverted once and logged).
 
+## TI C2000 (Saturn M microinverter)
+
+The HMI runs on a TMS320F28035, not a Cortex-M, and Unicorn has no C28x, so
+`c28x/` is an emulator of its own:
+
+* **CPU** (`c28x/isa.py`, `semantics.py`, `cpu.py`): a table-driven decoder
+  of the C28x instruction set (objmode 1; ~340 forms) whose entries compile to
+  Python closures: loc16/loc32 addressing, ST0/ST1 flags with the manual's
+  infinite-precision compares, RPT, the 64-bit IQmath helpers
+  (MAXL/MINL/MAXCUL/MINCUL, ASR64, QMPYL), LCR/LRETR, interrupts with the
+  hardware's context save and IRET.
+* **CLA** (`c28x/cla.py`): the floating-point coprocessor's task interpreter
+  with its pipeline: three delay slots after a branch, flags taken from four
+  instructions back, MAR loads that land three instructions late.
+* **Native accelerator** (`c28x/_c28x.c`, optional): the same instructions
+  and the CLA in C, built by `pip install` when a compiler is there. The
+  Python decoder stays the source of truth; the C core runs what it decoded and
+  falls back to the Python closure for anything not ported. Tests run every
+  instruction case on both and compare. Without it the HMI still runs, many
+  times slower.
+* **F2803x** (`c28x/f2803x*.py`): PIE, CPU timers, GPIO, the ADC with its
+  SOC/trigger/EOC/ADCINT rules, ePWM (counters computed, not stepped; shadow
+  loads at the boundaries the firmware selects), eCAP, SCI, LIN, I2C, the
+  watchdog. The boot ROM's IQmath tables (`c28x/iqmath.py`) are computed from
+  their definitions: the IQmath code in the application divides and takes
+  square roots with seeds and limits from them. TI's OTP calibration routines
+  are stubs that return what the device would.
+
+`machine.py` runs it all on the same event clock as the Cortex-M machines;
+delay loops the firmware spins in (`RPT #n || NOP` with a counter) are slept
+through.
+
 ## FC41D
 
 `fc41d/module.py` parses the AT stream incrementally, including binary and
@@ -92,10 +124,11 @@ marsemu/
   periph/     n32g45x.py · stm32.py · hrtim.py   (peripheral models + SoC builders)
               ka495xx.py · sh36735.py · sh367309.py (battery front ends) · i2c_gpio.py (bit-banged I2C)
   fc41d/      module.py (AT engine) · net.py · mqtt.py · cloud.py
+  c28x/       isa.py · semantics.py · cpu.py · cla.py · machine.py · f2803x*.py · iqmath.py · _c28x.c (accelerator)
   analysis/   gdbstub.py · trace.py · idle.py · b2500.py
   plant/      cosim.py · canbus.py · remote.py   (multi-MCU co-simulation)
-              venus3.py · venusd.py · venusa.py · venusce.py · jupiter.py · b2500.py · battery.py
-              venus3_cli.py (whole-device commands, CT meter, HTTP house)
+              venus3.py · venusd.py · venusa.py · venusce.py · jupiter.py · b2500.py · hmi.py · battery.py
+              venus3_cli.py (whole-device commands, CT meter, HTTP house) · hmi_cli.py
   modbus.py · uartbridge.py · b2500bus.py · extmodule.py (a real Wi-Fi module on a serial port)
   ui/        session.py (a device run for the dashboard) · server.py · addon.py · static/ (the page)
   profiles.py · emulator.py · cli.py

@@ -51,6 +51,15 @@ def test_info_reports_the_header(tmp_path):
     assert "VNSEMINI-0" in info["device_types"]
 
 
+def test_c2000_images_get_the_hmi_profile():
+    from marsemu.profiles import detect, is_c28x_image
+    # LB 0x3F0BA7 first, AT commands one character per 16-bit word
+    img = bytes.fromhex("7f00a70b") + bytes(64) + "AT+QVERSION".encode("utf-16-le") + bytes(64)
+    assert detect(img).name == "hmi"
+    # the same text in 8-bit characters is a Cortex-M image, not a C2000 one
+    assert not is_c28x_image(bytes.fromhex("7f00a70b") + b"AT+QVERSION")
+
+
 class _Board:
     """What a profile's setup hook sees of the emulator."""
 
