@@ -552,21 +552,35 @@ class Ecap(C28xPeripheral):
     def tsctr(self) -> int:
         return (self.m.clock.cycles - self.start) & 0xFFFFFFFF
 
-    def capture(self) -> None:
-        """An edge on the capture input (the configured polarity)."""
+    def edge(self, rising: bool) -> None:
+        """An edge on the capture input (ECAP1 pin).  Captured when it has the
+        polarity the current capture stage waits for (CAPxPOL: 0 = rising)."""
         ctl2 = self.r(0x15)
-        if not ctl2 & 0x10:   # TSCTRSTOP: counter stopped
+        if not ctl2 & 0x10 or ctl2 & 0x200:   # counter stopped, or APWM mode
             return
-        stop = (ctl2 >> 1) & 3
-        self.caps[self.ptr] = self.tsctr()
-        evt = self.ptr + 1
-        self.flg |= 1 << evt | 1
         ctl1 = self.r(0x14)
-        if ctl1 >> (2 * (evt - 1) + 1) & 1 if False else (ctl1 >> (1 + 2 * (evt - 1))) & 1:   # CTRRSTx
+        evt = self.ptr + 1
+        pol_falling = (ctl1 >> (2 * (evt - 1))) & 1
+        if bool(pol_falling) == rising:
+            return
+        now = self.tsctr()
+        if ctl1 & 0x100:   # CAPLDEN
+            self.caps[self.ptr] = now
+        if (ctl1 >> (2 * (evt - 1) + 1)) & 1:   # CTRRSTx: delta mode
             self.start = self.m.clock.cycles
-        self.ptr = 0 if self.ptr >= stop else self.ptr + 1
+        self.flg |= (1 << evt) | 1
+        stop = (ctl2 >> 1) & 3
+        if self.ptr >= stop:
+            self.ptr = 0
+        else:
+            self.ptr += 1
         if self.r(0x16) & (1 << evt):
             self.m.pie.raise_irq(4, 1)
+
+    def capture(self) -> None:
+        """An edge of whatever polarity the current stage waits for."""
+        ctl1 = self.r(0x14)
+        self.edge(not ((ctl1 >> (2 * self.ptr)) & 1))
 
     def read(self, off):
         if off in (0, 1):

@@ -100,6 +100,8 @@ def build(m: C28xMachine, models: Optional[Dict[str, type]] = None) -> None:
     # TI's OTP getters (DSP2803x_TempSensorConv.c / _OscComp.c): MOV @AL,#value; LRETR
     for addr, value in OTP_GETTERS.items():
         cpu.mem[addr:addr + 3] = array("H", (0x28A9, value & 0xFFFF, 0x0006))
+    from . import iqmath
+    iqmath.install(cpu.mem)
     from . import f2803x_sys as sysp
     from . import f2803x_adc as adcp
     from . import f2803x_comm as comm

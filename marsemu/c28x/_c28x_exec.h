@@ -257,10 +257,11 @@ static int exec1(Core *c, Entry *e, uint32_t at) {
         c->n = ((int64_t)x - y) < 0; c->z = x == y; c->c = (uint32_t)x >= (uint32_t)y;
         if ((e->key == K_MAXL && y > x) || (e->key == K_MINL && y < x)) c->acc = (uint32_t)y;
         break; }
-    case K_MAXCUL: case K_MINCUL: { b = rdl32(c, L); int32_t hi = si32(c->acc);
-        if (e->key == K_MAXCUL) { if (!(hi > 0 || (hi == 0 && c->p >= b)) && (hi < 0 || c->p < b)) c->p = b; }
-        else { if (!(hi < 0 || (hi == 0 && c->p <= b))) c->p = b; }
-        nz32(c, c->p); break; }
+    case K_MAXCUL: case K_MINCUL: { b = rdl32(c, L);
+        /* the upper halves were compared by MAXL/MINL: N,Z say how */
+        if (!c->z) { if ((e->key == K_MAXCUL) == (c->n != 0)) c->p = b; }
+        else if (e->key == K_MAXCUL ? c->p < b : c->p > b) { c->p = b; c->v = 1; }
+        break; }
     /* ------------------------------------------------------- multiply */
     case K_MPY_P_T_LOC: c->p = mul_ss(c->xt >> 16, rdl16(c, L)); break;
     case K_MPY_ACC_T_LOC: v = mul_ss(c->xt >> 16, rdl16(c, L)); c->acc = v; nz32(c, v); break;

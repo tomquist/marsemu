@@ -1078,23 +1078,17 @@ def build(key: str, f: dict, addr: int, size: int):   # noqa: C901 - one big tab
         return fn
     if key in ("MAXCUL", "MINCUL"):
         lo = l32()
+        mx = key == "MAXCUL"
 
         def fn(c):
+            # the upper halves were compared by MAXL/MINL: N and Z say how
             b = lo.rd(c)
-            hi = s32(c.acc)
-            # ACC:P vs 0:[loc32] (unsigned low half with the carry chain), as in the manual
-            if key == "MAXCUL":
-                if hi > 0 or (hi == 0 and c.p >= b):
-                    pass
-                else:
-                    if hi < 0 or c.p < b:
-                        c.p = b
-            else:
-                if hi < 0 or (hi == 0 and c.p <= b):
-                    pass
-                else:
+            if not c.z:
+                if mx == bool(c.n):
                     c.p = b
-            nz32(c, c.p)
+            elif (c.p < b) if mx else (c.p > b):
+                c.p = b
+                c.v = 1
         return fn
     # ------------------------------------------------------------ multiply
     if key == "MPY_P_T_LOC":
