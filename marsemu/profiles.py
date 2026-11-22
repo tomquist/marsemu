@@ -30,6 +30,10 @@ class Profile:
     sram_kb: int = 144
     #: UART the FC41D sits on (e.g. "USART1"); None = first UART that sends "AT"
     fc41d_uart: Optional[str] = None
+    #: (port, pin) of the GPIO that switches the FC41D's power (high = on); the
+    #: module is off while the MCU drives it low and boots afresh when it goes
+    #: high again.  None: the module stays powered whatever the MCU does
+    fc41d_power: Optional[Tuple[str, int]] = None
     #: (port, pin) -> level for GPIO inputs that matter
     gpio_inputs: Dict[Tuple[str, int], int] = field(default_factory=dict)
     #: default level of floating GPIO inputs
@@ -278,9 +282,25 @@ register(Profile(
 register(Profile(
     "venus3", "Venus E 3.0 / A / D control board (VNSE3/VNSA/VNSD)", device_type="VNSE3-0", cpi=1,
     setup=[lambda emu: control_eeprom(emu)]))
+def mini_spi_flash(emu) -> None:
+    """The Venus E Mini's control board keeps its settings (and logs) in a
+    W25Qxx-style SPI NOR flash on SPI1, chip select PA4: Control 309 reads it
+    with 03, erases with 20 and polls 05 before it programs.  Without the chip
+    every setting is back at its default after a restart."""
+    from .periph.n32g45x import SpiNorFlash
+    spi = emu.machine.bus.peripherals.get("SPI1")
+    if spi is None or spi.device is not None:
+        return
+    path = os.path.join(emu.state_dir, "spiflash.bin") if emu.state_dir else None
+    spi.device = dev = SpiNorFlash(emu.machine, path=path, cs=(emu.machine.bus.get("GPIOA"), 4))
+    emu.persist.append(dev)
+
+
 register(Profile(
     "venus-mini", "Venus E Mini (VNSEMINI) control board (PMU), N32G45x, app at 0x08008000",
-    device_type="VNSEMINI-0"))
+    # PA1 powers the module: Control 309 holds it low for 5 s at every boot
+    # (0x0802ec30, 0x0802ec74), and again to recover the module
+    device_type="VNSEMINI-0", fc41d_uart="USART2", fc41d_power=("A", 1), setup=[mini_spi_flash]))
 register(Profile(
     "jupiter", "Jupiter C/E (HMM/HMN-x) and C Plus (JPLS-8H) control board", device_type="HMN-1"))
 def preloaded_module_certs(emu) -> None:

@@ -149,7 +149,12 @@ voltages at start, then coulomb counting), capacity, protections. The battery
 is two LFP cells of 314 Ah in series (6.4 V, 2009 Wh: the firmware's rated
 capacity); the DC/DC boosts it to the inverter.
 
-* **Control** (`venus-mini` profile, Control 309): the real firmware.
+* **Control** (`venus-mini` profile, Control 309): the real firmware. It
+  switches the FC41D's power with PA1 (off for 5 s at every boot, and to
+  recover the module), so after a restart (`cd=61,rst=1`) the module boots
+  again and the firmware sets up Wi-Fi and MQTT from scratch. Its settings
+  are in an SPI NOR flash on SPI1 (chip select PA4; `spiflash.bin` in
+  `--state-dir`), so they survive the restart.
 * **Inverter board** (Micro 270): a Python model. Its protocol was taken
   from the control's request builders and reply handlers, its regulator from
   the Micro 270 image. The control forwards the meter reading of the
