@@ -150,12 +150,17 @@ def main() -> int:
         ap.error("nothing to send: --cd or --payload")
     dev = Device(a.firmware, [float(x) for x in a.pv.split(",")])
     t0 = time.time()
-    dev.run(a.boot, until=lambda: bool(dev.subs) and dev.t > 25)
+    # after a first boot the firmware opens its MQTT session a second time
+    # (around 35 s): commands sent before that are lost; wait it out
+    dev.run(a.boot, until=lambda: len(dev.subs) >= 2 or (dev.subs and dev.t > a.boot - 5))
     if not dev.subs:
         print(f"no MQTT subscription after {dev.t:.0f} s", file=sys.stderr)
         return 1
     dev.run(5.0)
-    topic = dev.subs[0]
+    if not status(dev, dev.subs[-1], 2.0):
+        print("the device does not answer cd=1", file=sys.stderr)
+        return 1
+    topic = dev.subs[-1]
     print(f"booted in {time.time() - t0:.0f} s wall; topic {topic}; {len(payloads)} commands", file=sys.stderr)
     running = {}
     queue = list(payloads)
