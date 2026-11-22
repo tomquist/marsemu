@@ -70,7 +70,7 @@ class Flyback:
         self.l_mag = l_mag
         self.f_sw = f_sw
         self.efficiency = efficiency
-        self.v = array.voc
+        self.v = array.voc if array.isc > 0 else 0.0
         self.i = 0.0          # converter input current (switching-period average), A
         self.p = 0.0          # converter input power now, W
         self.energy = 0.0     # J drawn since start, for averages
@@ -87,6 +87,9 @@ class Flyback:
     def step(self, dt: float, g: float) -> None:
         arr = self.array
         if dt <= 0:
+            return
+        if arr.isc <= 0:          # no light: no voltage either
+            self.v = self.i = self.p = 0.0
             return
         # the capacitor against the array: a few explicit substeps, or the
         # equilibrium when the step is long against the time constant

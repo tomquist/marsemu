@@ -1224,3 +1224,28 @@ def test_venus3_through_the_corebluetooth_peripheral():
         s.stop()
     assert uuid == "FF02"
     assert reply[3] == 0x04 and b"type=VNSE3-0" in reply, reply
+
+
+@pytest.mark.firmware
+def test_hmi_connects_to_the_grid_and_feeds_in():
+    """The Saturn M firmware observes the plant's grid (230 V, 50 Hz on the ADC
+    and ECAP1), closes its relay and tracks the strings' maximum power points;
+    its own report has the grid as the plant makes it."""
+    files = sorted(glob.glob(f"{EXTRA}/**/HMI-1/Control/132/*.bin", recursive=True)) if EXTRA else []
+    if not files:
+        pytest.skip("HMI-1 132 (MARSEMU_ARCHIVE) needed")
+    from marsemu.plant.hmi import Hmi
+    h = Hmi(files[0], pv=[300.0, 250.0])
+    subs, pubs = [], []
+    h.control.on("mqtt_subscribe", subs.append)
+    h.control.on("mqtt_publish", lambda t, p: pubs.append(p.decode("latin1")))
+    h.run(120, until=lambda: h.plant.relay and sum(f.p for f in h.plant.inputs) > 400)
+    assert h.plant.relay, f"relay still open after {h.time:.0f} s"
+    h.run(20)
+    pv = [f.p for f in h.plant.inputs]
+    assert pv[0] > 0.85 * 300 and pv[1] > 0.85 * 250, pv
+    h.control.mqtt_inject(subs[0], "cd=1")
+    h.run(2)
+    r = dict(kv.split("=", 1) for kv in pubs[-1].split(",") if "=" in kv)
+    assert abs(int(r["grd_v"]) - 2300) < 30 and abs(int(r["grd_f"]) - 5000) < 10
+    assert r["rel_s"] == "1"

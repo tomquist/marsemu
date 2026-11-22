@@ -124,7 +124,7 @@ marsemu ui HMJ-2/116/*.bin                  # then open http://127.0.0.1:8080/
 An X-ray view of the running device: its boards, chips and cells, the power
 flowing between them, every bus message, the registers the firmware writes,
 and controls for load, sun, faults and speed. Every device: B2500, Venus E 3.0, D, A
-and C/E, Venus E Mini, Jupiter C/E and C Plus, CT002/CT003. See
+and C/E, Venus E Mini, Jupiter C/E and C Plus, Saturn M (HMI), CT002/CT003. See
 [docs/ui.md](docs/ui.md).
 
 ## Quick start
