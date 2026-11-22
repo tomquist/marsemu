@@ -194,6 +194,9 @@ class Fc41d(UartDevice):
         self.transcript: List[Tuple[float, str, bytes]] = []
         self.keep_transcript = True
         self.echo = self.cfg.echo
+        #: False while the MCU holds the module's power/enable line low (see
+        #: :meth:`power_off`); it then neither answers nor sends anything
+        self.powered = True
         self.reset_state()
         machine.slice_hooks.append(self._drain_events)
 
@@ -273,7 +276,7 @@ class Fc41d(UartDevice):
 
     def send(self, data: bytes, delay_ms: Optional[float] = None) -> None:
         """Queue bytes from the module to the MCU."""
-        if self.uart is None:
+        if self.uart is None or not self.powered:
             return
         d = self.cfg.reply_ms if delay_ms is None else delay_ms
         now_ms = self.m.clock.seconds * 1000.0
@@ -327,6 +330,8 @@ class Fc41d(UartDevice):
         self.line(text, delay_ms if delay_ms else self.cfg.reply_ms)
 
     def on_tx(self, data: bytes) -> None:
+        if not self.powered:
+            return
         if self.keep_transcript:
             t = self.m.clock.seconds
             if self.transcript and self.transcript[-1][1] == ">" and t - self.transcript[-1][0] < 0.002 \
@@ -535,6 +540,9 @@ class Fc41d(UartDevice):
     # ---- system --------------------------------------------------------
     def power_on(self) -> None:
         """Module powered up (MCU toggled its enable/reset line, or at start)."""
+        self.powered = True
+        self.buf.clear()
+        self.raw_wait = None
         self.reset_state()
         if self.cfg.boot_banner:
             self.urc(self.cfg.boot_banner, self.cfg.boot_ms)
@@ -594,6 +602,40 @@ class Fc41d(UartDevice):
         for s in list(self.mqtt.values()):
             if s.open:
                 self._mqtt_drop(s, 1)
+
+    def power_off(self) -> None:
+        """The MCU cut the module's power (or held its enable line low): its
+        connections drop, and it stays silent until :meth:`power_on`."""
+        if not self.powered:
+            return
+        log.info("module powered off by the MCU")
+        for s in self.mqtt.values():
+            self.net.mqtt_close(s)
+        self.powered = False
+        self.reset_state()
+        self.emit("wifi", "off")
+
+    def power_from_gpio(self, gpio, pin: int) -> None:
+        """Let the MCU switch the module's power with a GPIO (``gpio`` a GPIO
+        peripheral with ``drive_watchers``): while it drives the pin low the
+        module is off, and it boots afresh when the pin goes high again.  A
+        released pin counts as high (the module's enable is pulled up), so a
+        reset of the MCU alone leaves the module running until the firmware
+        drives the pin low itself."""
+        state = {"on": gpio.driven(pin) != 0}
+        name = f"P{getattr(gpio, 'port', '?')}{pin}"
+
+        def changed(level: Optional[int]) -> None:
+            on = level != 0
+            if on == state["on"]:
+                return
+            state["on"] = on
+            if on:
+                log.info("MCU powers the module up (%s high)", name)
+                self.power_on()
+            else:
+                self.power_off()
+        gpio.drive_watchers.append((pin, changed))
 
     def at_QRST(self, mode, args):
         self.ok()
