@@ -22,12 +22,13 @@ def machine(words, entry=CODE):
     return m
 
 
-def run(words, steps=None, setup=None):
-    """Run ``words`` (ending in ``SB $,UNC``) until the CPU spins there."""
-    words = list(words) + [0x6F00]   # SB $,UNC
+def _run_one(words, steps, setup, native):
     m = machine(words)
     if setup:
         setup(m)
+    if native:
+        from marsemu.c28x.cpu import accelerate
+        assert accelerate(m.cpu)
     end = CODE + len(words) - 1
     for _ in range(steps or 2000):
         if m.cpu.pc == end:
@@ -35,6 +36,32 @@ def run(words, steps=None, setup=None):
         m.cpu.run(1)
     assert m.cpu.pc == end, f"did not finish, pc=0x{m.cpu.pc:06x}"
     return m.cpu
+
+
+def _have_native():
+    try:
+        from marsemu.c28x import _c28x  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def run(words, steps=None, setup=None):
+    """Run ``words`` (ending in ``SB $,UNC``) until the CPU spins there, on
+    the Python core and, when it is built, on the native one: both must end
+    in the same registers and memory."""
+    words = list(words) + [0x6F00]   # SB $,UNC
+    c = _run_one(words, steps, setup, False)
+    if _have_native():
+        from marsemu.c28x.cpu import REGISTERS
+        n = _run_one(words, steps, setup, True)
+        n.flush()
+        for r in REGISTERS:
+            if r != "insn_count":
+                assert getattr(n, r) == getattr(c, r), r
+        assert list(n.xar) == list(c.xar)
+        assert n.mem[0:0x10000] == c.mem[0:0x10000]
+    return c
 
 
 def f32(x):
@@ -212,3 +239,37 @@ def test_cla_float_ops():
     cla.force(1)
     assert math.isclose(b2f(tobits_(cla.mr[0])), -3.375)
     assert tobits_(cla.mr[1]) == (-3) & 0xFFFFFFFF
+
+
+@pytest.mark.parametrize("acc,p,want", [
+    (0x00000001, 0x00000005, (0x00000000, 0xFFFFFFFF)),   # above the maximum
+    (0x00000000, 0x00000007, (0x00000000, 0x00000007)),   # inside
+    (0xFFFFFFFE, 0x00000003, (0xFFFFFFFF, 0x00000000)),   # below the minimum
+    (0xFFFFFFFF, 0x80000000, (0xFFFFFFFF, 0x80000000)),   # inside, negative
+])
+def test_64bit_saturation(acc, p, want):
+    # IQmath's 64-bit clamp: MINL ACC,*+XAR7[2]; MINCUL P,*+XAR7[0];
+    # MAXL ACC,*+XAR7[6]; MAXCUL P,*+XAR7[4] against max 0:FFFFFFFF, min FFFFFFFF:0
+    def setup(m):
+        lim = (0xFFFFFFFF, 0, 0, 0xFFFFFFFF)
+        for k, v in enumerate(lim):
+            m.cpu.mem[0x8800 + 2 * k] = v & 0xFFFF
+            m.cpu.mem[0x8801 + 2 * k] = v >> 16
+        m.cpu.xar[7] = 0x8800
+        m.cpu.acc, m.cpu.p = acc, p
+    c = run([0x5650, 0x00D7, 0x5659, 0x00C7, 0x5661, 0x00F7, 0x5651, 0x00E7], setup=setup)
+    assert (c.acc, c.p) == want
+
+
+def test_iqmath_tables():
+    from marsemu.c28x import iqmath
+    t = iqmath.tables()
+    assert iqmath.END == 0x3FEB50          # SPRUI10's IQTABLES length
+    q30 = 1 << 30
+    assert t[iqmath.SIN + 2 * 128] == q30   # sin(pi/2)
+    # division seeds: 1/x in Q29 for the normalized divisor's top bits
+    assert abs(t[iqmath.INV + 16] / (1 << 29) - 1 / (257 / 512)) < 1e-6
+    assert t[iqmath.INV] == 2 << 29
+    # Q15 rounding entry: round 1<<14, max 2^46-1, min -2^46
+    e = iqmath.ROUND + 12 * 15
+    assert (t[e], t[e + 2], t[e + 6], t[e + 10]) == (1 << 14, 0, (1 << 14) - 1, 0xFFFFC000)

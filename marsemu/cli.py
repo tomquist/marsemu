@@ -106,6 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     from .plant import venus3_cli
     venus3_cli.add_parser(sub)
+    from .plant import hmi_cli
+    hmi_cli.add_parser(sub)
 
     u = sub.add_parser("ui", help="dashboard in the browser: start a device and look inside it")
     u.add_argument("image", nargs="?", help="start this image right away (else pick one in the dashboard)")
@@ -584,6 +586,9 @@ def _dispatch(args) -> int:
     if args.cmd in ("venus3", "venusd", "venusa", "jupiter", "venusmini", "b2500"):
         from .plant.venus3_cli import cmd_venus3
         return cmd_venus3(args)
+    if args.cmd == "hmi":
+        from .plant.hmi_cli import cmd_hmi
+        return cmd_hmi(args)
     if args.cmd == "decode-bus":
         try:
             return cmd_decode_bus(args)
