@@ -60,7 +60,29 @@ def test_mqtt_flow_and_inline_publish():
     u.rx.clear()
     assert f.mqtt_deliver("x/App/1/ctrl", b"cd=1")
     m.advance(0.1)
-    assert b'+QMTRECV: 0,1,"x/App/1/ctrl",4,"cd=1"' in u.rx
+    assert b'+QMTRECV: 0,0,"x/App/1/ctrl",4,"cd=1"' in u.rx
+
+
+
+def test_qmtrecv_msgid_is_zero_for_qos0_and_counts_for_qos1():
+    """A QoS-0 message has no packet identifier: the FC41D reports msgid 0, and
+    the CT00x firmwares drop a +QMTRECV with any other msgid."""
+    m, f, u = module()
+    f.got_ip = True
+    f.on_tx(b'AT+QMTOPEN=0,"broker",8883\r\n')
+    m.advance(0.5)
+    f.on_tx(b'AT+QMTCONN=0,"client"\r\n')
+    m.advance(0.5)
+    f.on_tx(b'AT+QMTSUB=0,1,"q0",0\r\n')
+    f.on_tx(b'AT+QMTSUB=0,2,"q1",1\r\n')
+    m.advance(0.1)
+    u.rx.clear()
+    for topic in ("q0", "q0", "q1", "q1"):
+        assert f.mqtt_deliver(topic, b"x")
+    m.advance(5)
+    assert bytes(u.rx).count(b'+QMTRECV: 0,0,"q0",1,"x"') == 2
+    assert b'+QMTRECV: 0,1,"q1",1,"x"' in u.rx
+    assert b'+QMTRECV: 0,2,"q1",1,"x"' in u.rx
 
 
 def test_udp_send_with_trailing_address():
