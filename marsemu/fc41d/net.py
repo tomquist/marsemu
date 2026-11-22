@@ -121,11 +121,33 @@ class Network:
             mod.post(lambda: mod.mqtt_deliver(topic, payload, sess.idx))
 
         def on_close(reason):
+            # A connection the firmware has since replaced (it opened and
+            # connected the session again) is not this session's any more:
+            # its loss, often the broker closing it for the new one's client
+            # ID, must not drop the new connection.
+            if sess.client is not client:
+                return
             log.warning("MQTT #%d connection lost: %s", sess.idx, reason)
-            mod.post(lambda: mod._mqtt_drop(sess, 1))
+            mod.post(lambda: sess.client is client and mod._mqtt_drop(sess, 1))
 
+        old = sess.client
+        if old is not None:
+            sess.client = sess.conn = None
+            old.close()
         client = MqttClient(host, port, tls=tls, on_message=on_message, on_close=on_close)
+        sess.client = client
         keepalive = int((sess.cfg.get("keepalive") or ["60"])[0] or 60)
+        t0 = mod.m.clock.seconds
+
+        def done(rc):
+            # A real module takes a while to connect to the cloud broker, and
+            # some firmware (B2500 HMJ) misses a +QMTCONN that comes sooner:
+            # never answer before the modelled connect time, however fast
+            # the local broker is.
+            if sess.client is not client:
+                return
+            wait = self.mqtt_connect_ms - (mod.m.clock.seconds - t0) * 1000.0
+            self._later(max(wait, 0.0), lambda: sess.client is client and cb(rc))
 
         def run():
             rc = client.connect(sess.client_id, user or None, pw or None, keepalive)
@@ -134,7 +156,7 @@ class Network:
                 for t in sess.subs:
                     client.subscribe(t)
             log.info("MQTT #%d -> %s:%d rc=%d", sess.idx, host, port, rc)
-            mod.post(lambda: cb(rc))
+            mod.post(lambda: done(rc))
         self._thread(run)
 
     def mqtt_subscribe(self, sess, topic: str, qos: int) -> None:
@@ -150,7 +172,11 @@ class Network:
             sess.conn.publish(topic, payload, qos, bool(retain))
 
     def mqtt_close(self, sess) -> None:
-        if isinstance(sess.conn, MqttClient):
+        client = sess.client
+        sess.client = None
+        if isinstance(client, MqttClient):
+            client.close()
+        if isinstance(sess.conn, MqttClient) and sess.conn is not client:
             sess.conn.close()
         sess.conn = None
 
@@ -226,7 +252,7 @@ class Network:
             so.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 so.bind(("127.0.0.1", port))
-            except OSError as e:
+            except (OSError, OverflowError) as e:   # OverflowError: port + offset outside 0-65535
                 log.warning("cannot bind UDP %d: %s", port, e)
                 return
             s.conn = so
@@ -250,10 +276,10 @@ class Network:
                     dest = (extra[0].strip('"'), int(extra[1]))
                 except ValueError:
                     pass
-            if self.udp_handler is not None:
+            if self.udp_handler is not None and self.udp_handler(s, data, dest) is not False:
                 # in-process peer (e.g. a CT002/CT003 emulator); it answers by
-                # calling udp_reply()
-                self.udp_handler(s, data, dest)
+                # calling udp_reply().  A handler returns False for datagrams
+                # that aren't for it (a Local API reply, say): those go on below.
                 return
             fwd = self.udp_forward.get(dest[1])
             if fwd is not None and s.conn is not None:

@@ -105,4 +105,4 @@ def test_broker_bridge_roundtrip():
     f.on_tx(b'AT+QMTPUB=0,0,0,0,"marstek_energy/HMA-1/device/abc/ctrl",4,"p1=0"\r\n')
     assert wait(m, lambda: broker.pubs == [("marstek_energy/HMA-1/device/abc/ctrl", b"p1=0")])
     broker.publish("marstek_energy/HMA-1/App/abc/ctrl", b"cd=1")
-    assert wait(m, lambda: b'+QMTRECV: 0,1,"marstek_energy/HMA-1/App/abc/ctrl",4,"cd=1"' in u.rx)
+    assert wait(m, lambda: b'+QMTRECV: 0,0,"marstek_energy/HMA-1/App/abc/ctrl",4,"cd=1"' in u.rx)

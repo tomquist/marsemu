@@ -150,8 +150,12 @@ class MqttSession:
     user: str = ""
     password: str = ""
     subs: List[str] = field(default_factory=list)
+    #: QoS each topic filter in ``subs`` was subscribed with
+    sub_qos: Dict[str, int] = field(default_factory=dict)
     cfg: Dict[str, List[str]] = field(default_factory=dict)
     conn: object = None
+    #: the broker connection being made or in use (net.mqtt_connect)
+    client: object = None
     msgid: int = 0
 
 
@@ -948,6 +952,7 @@ class Fc41d(UartDevice):
         for t in topics:
             if t not in s.subs:
                 s.subs.append(t)
+            s.sub_qos[t] = qos[0] if qos else 0
             log.info("MQTT subscribe #%d %s", s.idx, t)
             self.emit("mqtt_subscribe", t)
             self.net.mqtt_subscribe(s, t, qos[0] if qos else 0)
@@ -960,6 +965,7 @@ class Fc41d(UartDevice):
             t = unq(a)
             if t in s.subs:
                 s.subs.remove(t)
+            s.sub_qos.pop(t, None)
             self.net.mqtt_unsubscribe(s, t)
         self.ok()
         self.urc(f"+QMTUNS: {s.idx},{msgid},0", 20)
@@ -1028,10 +1034,17 @@ class Fc41d(UartDevice):
                 continue
             if not s.connected:
                 continue
-            if any(topic_matches(p, topic) for p in s.subs):
-                s.msgid = (s.msgid + 1) % 65536
+            matches = [p for p in s.subs if topic_matches(p, topic)]
+            if matches:
+                # A QoS-0 message has no packet identifier: the FC41D reports
+                # msgid 0, and the CT00x firmwares accept nothing else.
+                if max(s.sub_qos.get(p, 0) for p in matches) > 0:
+                    s.msgid = s.msgid % 65535 + 1
+                    msgid = s.msgid
+                else:
+                    msgid = 0
                 txt = payload.decode("latin1")
-                self.send_after_reply(f'\r\n+QMTRECV: {s.idx},{s.msgid},"{topic}",{len(payload)},"{txt}"\r\n'.encode("latin1"),
+                self.send_after_reply(f'\r\n+QMTRECV: {s.idx},{msgid},"{topic}",{len(payload)},"{txt}"\r\n'.encode("latin1"),
                                       at_ms - now_ms + self.cfg.reply_ms)
                 at_ms += self.cfg.mqtt_recv_gap_ms
                 delivered = True

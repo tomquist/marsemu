@@ -26,6 +26,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, List, Optional
 
+from ..fc41d.module import Fc41dConfig
+
 log = logging.getLogger("emu.venus3")
 
 SOH, STX, ETX = 1, 2, 3
@@ -286,11 +288,14 @@ def connect_house(device, house: House, meter="local", ct_mac: str = DEFAULT_CT_
     else:
         host, _, port = meter.rpartition(":")
         m = CtForwarder(device.control, host or meter, int(port or 12345))
-    def to_meter(sock, data: bytes, dest) -> None:
-        # a CT002/CT003 listens on its UDP port only; other broadcasts (the
-        # Venus E Mini announces itself to other Minis on 60606) go unanswered
-        if dest[1] == CT_UDP_PORT:
-            m(sock, data, dest)
+    def to_meter(sock, data: bytes, dest):
+        # a CT002/CT003 listens on its UDP port only; anything else (the Venus
+        # E Mini announcing itself to other Minis on 60606, a Local API reply)
+        # goes out like any other datagram: nowhere offline, for real with
+        # sockets="real"
+        if dest[1] != CT_UDP_PORT:
+            return False
+        m(sock, data, dest)
     device.control.fc41d.net.udp_handler = to_meter
     return m
 
@@ -360,7 +365,7 @@ def configure_self_consumption(device, ct_mac: str = DEFAULT_CT_MAC, say=None) -
 
 # --------------------------------------------------------------------------- command
 def add_parser(sub) -> None:
-    for cmd, model in (("venus3", "Venus E 3.0"), ("venusd", "Venus D"), ("venusa", "Venus A"),
+    for cmd, model in (("venus3", "Venus E 3.0"), ("venusd", "Venus D"), ("venusa", "Venus A"), ("venusce", "Venus C/E"),
                        ("jupiter", "Jupiter C/E/C Plus"), ("venusmini", "Venus E Mini"), ("b2500", "B2500")):
         _add(sub, cmd, model)
 
@@ -417,12 +422,21 @@ def _add(sub, cmd: str, model: str) -> None:
     v.add_argument("--module-serial", metavar="PORT[@BAUD]",
                    help="a real Wi-Fi module on this serial port instead of the FC41D model "
                         "(e.g. /dev/ttyUSB0, socket://host:port); use with --realtime")
-    v.add_argument("--slew", type=float, help="inverter slew rate, W/s (model default 1000)")
-    v.add_argument("--start-delay", type=float, help="inverter grid-connect delay from standby, s (default 3)")
+    if cmd != "venusce":     # the Venus C/E's power stage is its own model (plant/venusce.py)
+        v.add_argument("--slew", type=float, help="inverter slew rate, W/s (model default 1000)")
+        v.add_argument("--start-delay", type=float, help="inverter grid-connect delay from standby, s (default 3)")
     v.add_argument("--mqtt", choices=["offline", "broker"], default="offline",
                    help="broker: connect the device to --broker (e.g. for hm2mqtt)")
     v.add_argument("--broker", default="127.0.0.1:1883")
     v.add_argument("--broker-auth", help="user:password")
+    v.add_argument("--ble-mac", default=Fc41dConfig.ble_mac,
+                   help="BLE MAC of the Wi-Fi module; the device's MQTT topic id derives from it, so give "
+                        "every device on one broker its own (default %(default)s)")
+    v.add_argument("--wifi-mac", default=Fc41dConfig.wifi_mac, help="Wi-Fi MAC of the module (default %(default)s)")
+    v.add_argument("--sockets", choices=["offline", "real"], default="offline",
+                   help="real: the device's own UDP services (e.g. the Local API) listen on this host")
+    v.add_argument("--listen-offset", type=int, default=0, metavar="N",
+                   help="with --sockets real: host port = device port + N")
     v.add_argument("--status-every", type=float, default=5.0, help="print a status line every N virtual seconds")
     v.add_argument("--json-log", metavar="FILE", help="write status lines as JSON")
     v.add_argument("--serial", action="store_true", help="run BMS and control in one process (slower)")
@@ -438,6 +452,8 @@ def cmd_venus3(args) -> int:
     from .venusd import VenusD
     from .b2500 import B2500
     from .venusmini import VenusMini, mini_stage
+    from .venusce import VenusCE
+    from ..cli import announce_identity
 
     logging.basicConfig(level=logging.WARNING - 10 * min(args.verbose, 2),
                         format="%(levelname)-7s %(name)s: %(message)s")
@@ -446,14 +462,15 @@ def cmd_venus3(args) -> int:
     house = House(dict(zip(PHASES, loads)), args.phase)
     host, _, port = args.broker.rpartition(":")
     net = Network(mqtt=args.mqtt, broker=(host or args.broker, int(port or 1883)),
-                  broker_auth=tuple(args.broker_auth.split(":", 1)) if args.broker_auth else None)
+                  broker_auth=tuple(args.broker_auth.split(":", 1)) if args.broker_auth else None,
+                  sockets=args.sockets, listen_offset=args.listen_offset)
     stage = mini_stage(args.temp) if args.cmd == "venusmini" else PowerStage(ambient_c=args.temp)
-    if args.slew:
+    if getattr(args, "slew", None):
         stage.slew_w_per_s = args.slew
-    if args.start_delay is not None:
+    if getattr(args, "start_delay", None) is not None:
         stage.start_delay_s = args.start_delay
     cls = {"venusd": VenusD, "venusa": VenusA, "jupiter": Jupiter, "b2500": B2500,
-           "venusmini": VenusMini}.get(args.cmd, VenusE3)
+           "venusmini": VenusMini, "venusce": VenusCE}.get(args.cmd, VenusE3)
     pack = LfpPack(soc=args.soc / 100.0, temp_c=args.temp, ambient_c=args.temp, capacity_ah=cls.CAPACITY_AH,
                    cells_n=cls.CELLS)
     extra = {"pv": [float(x) for x in args.pv.split(",")]} if hasattr(args, "pv") else {}
@@ -467,7 +484,8 @@ def cmd_venus3(args) -> int:
     images = (args.control,) if args.cmd in ("b2500", "venusmini") or (args.cmd == "jupiter" and not args.bms) \
         else (args.control, args.bms)
     v = cls(*images, pack=pack, stage=stage, realtime=args.realtime,
-            control_kwargs={"network": net, "state_dir": args.state_dir, "external_module": args.module_serial},
+            control_kwargs={"network": net, "state_dir": args.state_dir, "external_module": args.module_serial,
+                            "fc41d": Fc41dConfig(ble_mac=args.ble_mac, wifi_mac=args.wifi_mac)},
             parallel=not args.serial, **extra)
     mppt = getattr(v, "mppt", None)
     set_pv = v.set_pv if hasattr(v, "set_pv") else (mppt.set_pv if mppt else None)
@@ -500,6 +518,7 @@ def cmd_venus3(args) -> int:
         print(f"grid power at http://127.0.0.1:{args.http_port}/power, status at /status", flush=True)
 
     e.on("mqtt_publish", lambda t, p: log.info("MQTT> %s %s", t, p[:200]))
+    announce_identity(e, args.ble_mac, say=lambda text: print(f"[{v.time:8.1f}] {text}", flush=True))
     if args.at:
         e.on("at", lambda line: print(f"[{v.time:8.1f}] AT  {line}", flush=True))
         e.on("at_rx", lambda line, ms=None: print(
