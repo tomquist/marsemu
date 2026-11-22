@@ -221,3 +221,115 @@ def test_mqtt_message_waits_for_a_command_reply_to_leave_the_uart():
     reply_end = max(t + len(d) * 10_000 / 115200 for t, d in log if b"QMTRECV" not in d)
     (t_recv,) = [t for t, d in log if b"+QMTRECV" in d]
     assert t_recv >= reply_end + f.cfg.urc_gap_ms - 0.01
+
+
+class _Broker:
+    """A minimal MQTT 3.1.1 broker on localhost: CONNACKs every CONNECT and,
+    like mosquitto, closes an older connection that has the same client ID."""
+
+    def __init__(self):
+        import socket
+        import threading
+        self.srv = socket.socket()
+        self.srv.bind(("127.0.0.1", 0))
+        self.srv.listen()
+        self.port = self.srv.getsockname()[1]
+        self.by_client = {}
+        self.connects = 0
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self):
+        import threading
+        while True:
+            try:
+                c, _ = self.srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._serve, args=(c,), daemon=True).start()
+
+    def _serve(self, c):
+        try:
+            data = c.recv(4096)
+            if not data or data[0] >> 4 != 1:
+                return
+            # fixed header (1 byte type, 1 byte length for short packets),
+            # protocol name, level, flags, keepalive, then the client ID
+            i = 2 + 2 + data[3] + 4
+            cid = data[i + 2:i + 2 + int.from_bytes(data[i:i + 2], "big")]
+            old = self.by_client.get(cid)
+            self.by_client[cid] = c
+            if old is not None:
+                import socket
+                old.shutdown(socket.SHUT_RDWR)
+                old.close()
+            self.connects += 1
+            c.sendall(b"\x20\x02\x00\x00")
+            while c.recv(4096):
+                pass
+        except OSError:
+            pass
+
+    def close(self):
+        self.srv.close()
+        for c in self.by_client.values():
+            c.close()
+
+
+def _wait_for(m, u, text, seconds=5.0):
+    import time
+    end = time.time() + seconds
+    while time.time() < end:
+        m.advance(0.01)
+        if text in u.rx:
+            return True
+        time.sleep(0.005)
+    return False
+
+
+def test_broker_connect_is_answered_after_the_modelled_connect_time():
+    """A local broker answers within a millisecond; the module still takes
+    its usual connect time, as B2500 (HMJ) firmware misses a +QMTCONN that
+    comes sooner and starts the connection over."""
+    b = _Broker()
+    try:
+        m = Machine()
+        n32g45x.build(m)
+        f = Fc41d(m, Network(mqtt="broker", broker=("127.0.0.1", b.port), mqtt_connect_ms=150),
+                  Fc41dConfig(reply_ms=0))
+        u = FakeUart()
+        f.attach(u)
+        f.got_ip = True
+        f.on_tx(b'AT+QMTOPEN=0,"broker",8883\r\n')
+        m.advance(0.5)
+        t0 = m.clock.seconds
+        f.on_tx(b'AT+QMTCONN=0,"client"\r\n')
+        assert _wait_for(m, u, b"+QMTCONN: 0,0,0")
+        assert m.clock.seconds - t0 >= 0.15
+    finally:
+        b.close()
+
+
+def test_broker_reconnect_does_not_drop_the_new_connection():
+    """Connecting a session again replaces its broker connection; the broker
+    closing the old one for the shared client ID is no connection loss."""
+    b = _Broker()
+    try:
+        m = Machine()
+        n32g45x.build(m)
+        f = Fc41d(m, Network(mqtt="broker", broker=("127.0.0.1", b.port), mqtt_connect_ms=0),
+                  Fc41dConfig(reply_ms=0))
+        u = FakeUart()
+        f.attach(u)
+        f.got_ip = True
+        f.on_tx(b'AT+QMTOPEN=0,"broker",8883\r\n')
+        m.advance(0.5)
+        f.on_tx(b'AT+QMTCONN=0,"client"\r\n')
+        assert _wait_for(m, u, b"+QMTCONN: 0,0,0")
+        u.rx.clear()
+        f.on_tx(b'AT+QMTCONN=0,"client"\r\n')
+        assert _wait_for(m, u, b"+QMTCONN: 0,0,0")
+        assert not _wait_for(m, u, b"+QMTSTAT", 0.5)
+        assert b.connects == 2
+        assert f.mqtt[0].connected
+    finally:
+        b.close()

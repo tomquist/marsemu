@@ -152,6 +152,8 @@ class MqttSession:
     subs: List[str] = field(default_factory=list)
     cfg: Dict[str, List[str]] = field(default_factory=dict)
     conn: object = None
+    #: the broker connection being made or in use (net.mqtt_connect)
+    client: object = None
     msgid: int = 0
 
 

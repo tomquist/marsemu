@@ -121,11 +121,33 @@ class Network:
             mod.post(lambda: mod.mqtt_deliver(topic, payload, sess.idx))
 
         def on_close(reason):
+            # A connection the firmware has since replaced (it opened and
+            # connected the session again) is not this session's any more:
+            # its loss, often the broker closing it for the new one's client
+            # ID, must not drop the new connection.
+            if sess.client is not client:
+                return
             log.warning("MQTT #%d connection lost: %s", sess.idx, reason)
-            mod.post(lambda: mod._mqtt_drop(sess, 1))
+            mod.post(lambda: sess.client is client and mod._mqtt_drop(sess, 1))
 
+        old = sess.client
+        if old is not None:
+            sess.client = sess.conn = None
+            old.close()
         client = MqttClient(host, port, tls=tls, on_message=on_message, on_close=on_close)
+        sess.client = client
         keepalive = int((sess.cfg.get("keepalive") or ["60"])[0] or 60)
+        t0 = mod.m.clock.seconds
+
+        def done(rc):
+            # A real module takes a while to connect to the cloud broker, and
+            # some firmware (B2500 HMJ) misses a +QMTCONN that comes sooner:
+            # never answer before the modelled connect time, however fast
+            # the local broker is.
+            if sess.client is not client:
+                return
+            wait = self.mqtt_connect_ms - (mod.m.clock.seconds - t0) * 1000.0
+            self._later(max(wait, 0.0), lambda: sess.client is client and cb(rc))
 
         def run():
             rc = client.connect(sess.client_id, user or None, pw or None, keepalive)
@@ -134,7 +156,7 @@ class Network:
                 for t in sess.subs:
                     client.subscribe(t)
             log.info("MQTT #%d -> %s:%d rc=%d", sess.idx, host, port, rc)
-            mod.post(lambda: cb(rc))
+            mod.post(lambda: done(rc))
         self._thread(run)
 
     def mqtt_subscribe(self, sess, topic: str, qos: int) -> None:
@@ -150,7 +172,11 @@ class Network:
             sess.conn.publish(topic, payload, qos, bool(retain))
 
     def mqtt_close(self, sess) -> None:
-        if isinstance(sess.conn, MqttClient):
+        client = sess.client
+        sess.client = None
+        if isinstance(client, MqttClient):
+            client.close()
+        if isinstance(sess.conn, MqttClient) and sess.conn is not client:
             sess.conn.close()
         sess.conn = None
 
