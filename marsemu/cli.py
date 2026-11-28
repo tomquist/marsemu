@@ -539,6 +539,8 @@ def c28x_image_info(path: str, raw: bytes, prof) -> dict:
     text = raw[0::2]
     entry = struct.unpack_from("<HH", raw, 0)
     names = sorted(set(re.findall(rb"HMI-\d+", text)))
+    # the MPPT board's images end with the device type in 8-bit characters (VNSD)
+    names = sorted(set(names) | set(re.findall(rb"(?:VNS[A-Z0-9]+|JPLS-\w+)", raw[-0x400:])))
     return {
         "file": path, "size": len(raw), "profile": prof.name, "cpu": "TMS320C28x (+ CLA)",
         "linked_at": hex(FLASH_BASE), "entry": hex(((entry[0] & 0x3F) << 16) | entry[1]),

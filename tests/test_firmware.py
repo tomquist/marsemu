@@ -5,6 +5,7 @@ These take 30-120 s each and need the images, so they only run with
 """
 import glob
 import os
+import struct
 
 import pytest
 
@@ -28,6 +29,7 @@ CASES = [
 if EXTRA:
     CASES += [
         ("venus3-VNSE3-151", f"{EXTRA}/**/VNSE3-0/Control/151/*.bin", 70),
+        ("venus3-VNSE3-401", f"{EXTRA}/**/VNSE3-0/Control/401/*.bin", 70),
         ("ct002-HME4-124", f"{EXTRA}/**/HME-4/124/*.bin", 90),
         ("jupiter-JPLS-143", f"{EXTRA}/**/JPLS-8H/143/*.bin", 70),
         ("venus-mini-VNSEMINI-309", f"{EXTRA}/**/VNSEMINI-0/Control/309/*.bin", 40),
@@ -431,16 +433,17 @@ def test_jupiter_c_plus_reports_mppt_and_bms_battery_current():
 
 
 @pytest.mark.firmware
-def test_jupiter_c_plus_with_its_bms_firmware():
-    """Jupiter C Plus: control V143 and the real BMS V37 on one CAN bus; the
-    BMS answers the control's broadcast and its readings reach cd=14."""
+@pytest.mark.parametrize("bms_version", ["37", "38"])
+def test_jupiter_c_plus_with_its_bms_firmware(bms_version):
+    """Jupiter C Plus: control V143 and the real BMS (V37, V38) on one CAN bus;
+    the BMS answers the control's broadcast and its readings reach cd=14."""
     from marsemu.plant.jupiter import Jupiter
     if not EXTRA:
         pytest.skip("set MARSEMU_ARCHIVE to a firmware archive with JPLS-8H")
     ctl = sorted(glob.glob(f"{EXTRA}/**/JPLS-8H/143/*.bin", recursive=True))
-    bms = sorted(glob.glob(f"{EXTRA}/**/JPLS-8H/37/*.bin", recursive=True))
+    bms = sorted(glob.glob(f"{EXTRA}/**/JPLS-8H/{bms_version}/*.bin", recursive=True))
     if not ctl or not bms:
-        pytest.skip("Jupiter C Plus JPLS-8H V143 / V37 not available")
+        pytest.skip(f"Jupiter C Plus JPLS-8H V143 / V{bms_version} not available")
     v = Jupiter(ctl[0], bms[0], pv=[300, 300, 0, 0])
     subs, pubs, frames = [], [], []
     v.control.on("mqtt_subscribe", subs.append)
@@ -461,6 +464,92 @@ def test_jupiter_c_plus_with_its_bms_firmware():
         assert abs(int(bms["b_cur"]) - int(mppt["b_cur"])) <= 2 and int(bms["b_cur"]) > 50
         assert v.status()["mos"] == {"charge": True, "discharge": True, "precharge": False}
         assert v.micro.bms_flags == 3 and v.micro.limits()[0] > 0               # limits from the real BMS
+    finally:
+        v.close()
+
+
+#: what the controls send the MPPT (node 0x21): the PV limit command's body
+#: (<mode, limit W, charge voltage 0.1 V[, ?]>), and the C Plus's start frame
+MPPT_COMMANDS = {
+    "venusd": {"limit": struct.pack("<HHHH", 0, 2650, 576, 0x1919), "start": None},
+    "cplus": {"limit": struct.pack("<HHH", 0, 2000, 571), "start": bytes.fromhex("0000000001")},
+}
+
+
+@pytest.mark.firmware
+@pytest.mark.parametrize("path,version,commands,seconds", [
+    ("VNSD-0/MPPT/104", 104, "venusd", 14), ("VNSD-0/MPPT/1025", 1025, "venusd", 14),
+    ("JPLS-8H/213", 213, "cplus", 26), ("JPLS-8H/217", 217, "cplus", 26)])
+def test_mppt_firmware_finds_the_maximum_power_point(path, version, commands, seconds):
+    """The MPPT board (F28035) on its own, sent what the control sends: it
+    answers the version query and the status poll, and its tracker takes the
+    strings from open circuit to their maximum power point (the C Plus's
+    after its start delay of about 15 s)."""
+    from marsemu.plant.mppt import MpptPlant
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    files = sorted(glob.glob(f"{EXTRA}/**/{path}/*.bin", recursive=True))
+    if not files:
+        pytest.skip(f"{path} not in the archive")
+    e = Emulator(files[0])
+    assert e.profile.name == "mppt"
+    m = e.machine
+    plant = MpptPlant(e, [400, 300, 0, 0], voc=48.0, v_bat=53.0)
+    can, clk = m.get("ECANA"), m.clock
+    sent = []
+    can.tx_listeners.append(lambda i, d, x: sent.append((i, d)))
+    cmd = MPPT_COMMANDS[commands]
+
+    def every(period, fn, start):
+        def tick():
+            fn()
+            clk.after(int(period * clk.hz), tick, "ctl")
+        clk.at(int(start * clk.hz), tick, "ctl")
+
+    def limit():
+        # the head and the body a frame time apart, as on the bus (the
+        # firmware's mailbox would be overwritten otherwise)
+        can.inject(0x00012102, b"\x01\0\0\0", True)
+        clk.after(int(0.0005 * clk.hz), lambda: can.inject(0x01012102, cmd["limit"], True), "ctl")
+    every(0.5, lambda: can.inject(0x00012103, bytes(4), True), 0.2)
+    every(5.0, limit, 0.5)
+    if cmd["start"]:
+        every(3.25, lambda: can.inject(0x00012101, cmd["start"], True), 0.8)
+    clk.at(int(0.4 * clk.hz), lambda: can.inject(0x000121CB, bytes(4), True), "ctl")
+    e.run(seconds)
+    st = plant.status()
+    assert m.reset_count == 1 and not m.fault
+    ver = [d for i, d in sent if i == 0x012101CB]
+    assert ver and struct.unpack_from("<H", ver[0], 2)[0] == version
+    # the status block: a header frame with the number of data frames, then the frames
+    heads = [d for i, d in sent if i == 0x00210103]
+    assert heads and heads[-1][:2] == b"\x07\x00"
+    assert st["pv_w"][0] > 390 and st["pv_w"][1] > 290, st                  # 400 W and 300 W strings
+    assert 37 < st["pv_v"][0] < 41                                           # the curve's maximum is at 39 V
+    assert st["dc_w"] > 650
+
+
+@pytest.mark.firmware
+def test_venus_d_with_its_mppt_firmware_charges_from_pv():
+    """Venus D: control 151, BMS 118 and the MPPT board's firmware (104), each
+    in its own process: the control commands the MPPT, which harvests the
+    string and charges the pack."""
+    from marsemu.plant.venusd import VenusD
+    if not EXTRA:
+        pytest.skip("set MARSEMU_ARCHIVE to a firmware archive")
+    ctl = sorted(glob.glob(f"{EXTRA}/**/VNSD-0/Control/151/*.bin", recursive=True))
+    bms = sorted(glob.glob(f"{EXTRA}/**/VNSD-0/BMS/118/*.bin", recursive=True))
+    mppt = sorted(glob.glob(f"{EXTRA}/**/VNSD-0/MPPT/104/*.bin", recursive=True))
+    if not ctl or not bms or not mppt:
+        pytest.skip("Venus D control 151 / BMS 118 / MPPT 104 not in the archive")
+    v = VenusD(ctl[0], bms[0], mppt=mppt[0], pv=[500, 0, 0, 0])
+    try:
+        v.run(40, until=lambda: sum(v.mppt.pv_w) > 480)
+        assert sum(v.mppt.pv_w) > 480, f"MPPT harvests {v.mppt.pv_w} of 500 W"
+        v.run(5)
+        assert v.mppt.version == 104 and v.mppt.polls > 10 and v.mppt.limit_w
+        assert v.pack.current_a > 5, "the PV should charge the pack"
+        assert v.mppt.pv_v[0] < 45                                           # off open circuit (48 V)
     finally:
         v.close()
 

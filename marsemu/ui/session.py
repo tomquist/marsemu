@@ -766,9 +766,12 @@ class VenusBoardSession(CanBoardSession):
     DEVICE = "VenusE3"
     PV_INPUTS = 0
 
-    def __init__(self, firmware: str, *, bms: str, pv=(300.0, 300.0, 0.0, 0.0), packs: int = 1, **kw):
+    def __init__(self, firmware: str, *, bms: str, pv=(300.0, 300.0, 0.0, 0.0), packs: int = 1,
+                 mppt: Optional[str] = None, **kw):
         self.sun = [float(x) for x in pv][:4] + [0.0] * (4 - len(pv[:4]))
         self.n_packs = max(1, int(packs))
+        #: the MPPT board's firmware image (Venus D), run instead of the MPPT model
+        self.mppt_image = mppt
         super().__init__(firmware, bms=bms, **kw)
 
     def _build(self, control_kwargs: dict, soc: float, **_):
@@ -780,6 +783,8 @@ class VenusBoardSession(CanBoardSession):
                          ambient_c=self.ambient_c, spread=0.01) for _ in range(n)]
         self.stage = venus3.PowerStage(ambient_c=self.ambient_c)
         kw = {"pv": self.sun} if self.PV_INPUTS else {}
+        if self.mppt_image:
+            kw["mppt"] = self.mppt_image
         dev = cls(self.firmware, self.bms_image, pack=packs[0], packs=packs if n > 1 else None, stage=self.stage,
                   control_kwargs=control_kwargs, parallel=True, **kw)
         self.micro = dev.micro
@@ -823,9 +828,11 @@ class VenusBoardSession(CanBoardSession):
         mppt = getattr(self.dev, "mppt", None)
         if mppt is None:
             return None
+        real = hasattr(mppt, "pv_v")
         return {"avail": [round(x, 1) for x in self.sun], "pv": [round(x, 1) for x in mppt.pv_w],
                 "limit": mppt.limit_w, "dc": round(mppt.dc_power, 1), "mode": mppt.mode,
-                "version": getattr(mppt, "version", None)}
+                "version": getattr(mppt, "version", None), "real": real,
+                **({"v": [round(x, 1) for x in mppt.pv_v]} if real else {})}
 
     def _device_snapshot(self) -> dict:
         mi, d = self.micro, self.dev
@@ -851,7 +858,8 @@ class VenusE3Session(VenusBoardSession):
 
 
 class VenusDSession(VenusBoardSession):
-    """A Venus D: control and BMS firmware, the inverter and MPPT models, its packs."""
+    """A Venus D: control and BMS firmware, the inverter model, the MPPT (its
+    firmware when its image is given, else the model), its packs."""
     MODEL = "Venus D"
     DEVICE = "VenusD"
     PV_INPUTS = 4
@@ -881,8 +889,10 @@ class JupiterSession(VenusBoardSession):
     PV_INPUTS = 4
     CHANNELS = ("FW", "CAN", "USART1", "MQTT", "RF", "BLE", "EVT", "ALARM")
 
-    def __init__(self, firmware: str, *, bms: Optional[str] = None, device_type: Optional[str] = None, **kw):
+    def __init__(self, firmware: str, *, bms: Optional[str] = None, device_type: Optional[str] = None,
+                 mppt: Optional[str] = None, **kw):
         kw.pop("packs", None)
+        self.mppt_image = mppt
         self.cplus = bool(bms) or "JPLS" in os.path.basename(firmware).upper()
         self.MODEL = "Jupiter C Plus" if self.cplus else "Jupiter C/E"
         self.sun = [float(x) for x in kw.pop("pv", (300.0, 300.0, 0.0, 0.0))][:4]
@@ -907,7 +917,7 @@ class JupiterSession(VenusBoardSession):
                        temp_c=self.ambient_c, ambient_c=self.ambient_c, spread=0.01)
         self.stage = PowerStage(ambient_c=self.ambient_c)
         dev = Jupiter(self.firmware, self.bms_image, pv=self.sun, pack=pack, stage=self.stage,
-                      control_kwargs=control_kwargs)
+                      control_kwargs=control_kwargs, mppt=self.mppt_image)
         self.micro = dev.micro
         return dev
 
@@ -1362,7 +1372,9 @@ PAIRED_TYPES: Dict[str, list] = {
 }
 #: sessions that run without a BMS image too
 BMS_OPTIONAL = (JupiterSession,)
+#: sessions that run the MPPT board's firmware when given its image (the MPPT model otherwise)
+MPPT_OPTIONAL = (VenusDSession, JupiterSession)
 
 __all__ = ["DeviceSession", "B2500Session", "HmiSession", "VenusMiniSession", "VenusE3Session", "VenusDSession", "VenusASession", "JupiterSession",
-           "VenusCESession", "CtSession", "SESSION_TYPES", "PAIRED_TYPES", "BMS_OPTIONAL", "Event",
+           "VenusCESession", "CtSession", "SESSION_TYPES", "PAIRED_TYPES", "BMS_OPTIONAL", "MPPT_OPTIONAL", "Event",
            "decode_venus_can"]

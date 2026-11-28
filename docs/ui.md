@@ -38,16 +38,18 @@ data from the running firmware:
   (`--ble-peripheral`).
 
 Every device marsemu models. Pick the image on the start screen; devices
-with a BMS image of their own take it too.
+with a BMS image of their own take it too, and the Venus D and the Jupiter
+the MPPT board's image if it is in the folder (it runs at about a sixth of
+real time, and the device with it).
 
 | Device | Images | What the view shows |
 |---|---|---|
 | **B2500** | one (`b2500-v1`, `-v2`, `-v3`) | the one MCU, the SH367309 front end and 14 cells, both PV inputs and outputs, the microinverter, extension packs on UART5 |
 | **Venus E 3.0** | control (`venus3`, VNSE3) + BMS | control and BMS firmware (the BMS in its own process), the KA495XX and 16 cells, the inverter board model, EEPROM, RS485 |
-| **Venus D** | control (VNSD) + BMS | as the E 3.0, plus the MPPT model with four PV strings; stacked packs (`packs` on the start screen) |
+| **Venus D** | control (VNSD) + BMS, MPPT optional | as the E 3.0, plus the MPPT with four PV strings: its firmware with its image (MPPT 104), else the model; stacked packs (`packs` on the start screen) |
 | **Venus A** | control (VNSA) + BMS | the SH36735 front end and 13 cells, the inverter with its four PV inputs; stacked packs |
 | **Venus E Mini** | control (`venus-mini`, VNSEMINI) | the control firmware with its battery management, the inverter and DC/DC models on UART4/UART5, two cells |
-| **Jupiter C/E, C Plus** | control (`jupiter`), BMS optional | the inverter and MPPT models; the C Plus's real BMS firmware with its image, else the BMS model (Pylontech-style frames) |
+| **Jupiter C/E, C Plus** | control (`jupiter`), BMS and MPPT optional | the inverter model; the C Plus's real BMS and MPPT firmware with their images, else the BMS model (Pylontech-style frames) and the MPPT model |
 | **Venus C/E** | control (`venus`, HMG) + BMS | the control MCU runs the power stage itself: the LLC, the DC bus, the bridge and the grid relay it drives, the BMS firmware on CAN. It runs at about a sixth of real time |
 | **Saturn M (HMI)** | one (`hmi`) | the F28035 running the whole microinverter: the grid-connect state, both flybacks with their duty and the strings' voltage and current, the unfolder and the grid relay; PV sliders, a grid-loss scenario. It runs at about a fifth of real time |
 | **CT002 / CT003** | one (`ct00x`) | the meter's firmware answering virtual batteries that poll it over UDP (how many, and what power they report, are controls). The grid it measures is the house load, spread over the three phases, minus what each battery delivers: on a CT002 through a model of its metering chip, on a CT003 (a P1 reader) as the utility meter's telegrams on its P1 port |

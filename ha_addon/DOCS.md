@@ -16,7 +16,9 @@ panel and drop the image file into it, or copy it into the add-on's folder
 `/addon_configs/<id>_marsemu/firmware` (the Samba or File editor add-on reach
 it). Every device marsemu models is supported: B2500, Venus E 3.0, D, A and C/E
 (each with its control and BMS image), Venus E Mini, Jupiter C/E and C Plus, CT002/CT003,
-and the Saturn M microinverter (HMI).
+and the Saturn M microinverter (HMI). The Venus D and the Jupiter C Plus also
+run their MPPT board's firmware if its image is in the folder (picked on the
+start screen); the device then runs at about a sixth of real time.
 
 ## Options
 

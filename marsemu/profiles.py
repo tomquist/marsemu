@@ -373,6 +373,10 @@ register(Profile(
     hz=60_000_000, flash_kb=128, sram_kb=20, fc41d_uart="SCIA", device_type="HMI-1",
     notes="LIN-A runs a debug console (115200 baud); settings in a 24C32 EEPROM on I2C"))
 register(Profile(
+    "mppt", "PV charger (MPPT) board of the Venus D and Jupiter C Plus, TMS320F2803x (C28x + CLA)", soc="f2803x",
+    hz=60_000_000, flash_kb=128, sram_kb=20, fc41d_uart=None,
+    notes="no FC41D: talks to the control board on eCAN-A; a Letter shell debug console on LIN-A (115200 baud)"))
+register(Profile(
     "aux-g4", "Secondary STM32G474 MCU without FC41D (Venus D/E 3.0 inverter board)", soc="stm32g4",
     hz=170_000_000, sram_kb=128, fc41d_uart=None))
 
@@ -408,20 +412,33 @@ def strings_of(image: bytes) -> List[bytes]:
     return re.findall(rb"[\x20-\x7e]{6,}", image)
 
 
+def c28x_text(image: bytes) -> bytes:
+    """The strings of a C2000 image: the TI compiler stores them one
+    character per 16-bit word, so they are the low bytes of words whose high
+    byte is 0 (everything else becomes a 0 separator)."""
+    return bytes(lo if hi == 0 else 0 for lo, hi in zip(image[0::2], image[1::2]))
+
+
 def is_c28x_image(image: bytes) -> bool:
-    """A TI C2000 (C28x) application image: 16-bit characters (the AT
-    command strings are stored one character per word) and a long branch
-    (``LB 0x3Fxxxx``) as its first instruction."""
+    """A TI C2000 (C28x) application image for the F2803x: a long branch
+    into flash (``LB 0x3Exxxx``/``0x3Fxxxx``) as its first instruction and
+    text stored one character per 16-bit word (AT commands, console
+    messages).  A Cortex-M image never starts like this: its first word is
+    the initial stack pointer, in SRAM."""
     if len(image) < 8:
         return False
     w0, w1 = struct.unpack_from("<HH", image, 0)
-    return (w0 & 0xFFC0) == 0x0040 and b"A\x00T\x00+\x00Q\x00" in image
+    if (w0 & 0xFFC0) != 0x0040 or not 0x3E8000 <= ((w0 & 0x3F) << 16 | w1) < 0x3F8000:
+        return False
+    if b"A\x00T\x00+\x00Q\x00" in image:
+        return True
+    return len(re.findall(rb"[\x20-\x7e]{8,}", c28x_text(image[:0x40000]))) >= 8
 
 
 def detect(image: bytes, filename: str = "") -> Profile:
     image = strip_header(image)
     if is_c28x_image(image):
-        return PROFILES["hmi"]
+        return PROFILES["hmi" if b"A\x00T\x00+\x00Q\x00" in image else "mppt"]
     sp, reset = struct.unpack_from("<II", image, 0)
     has_at = b"AT+QBLE" in image or b"AT+QVERSION" in image
     name = filename.lower()

@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from .session import BMS_OPTIONAL, PAIRED_TYPES, SESSION_TYPES, DeviceSession
+from .session import BMS_OPTIONAL, MPPT_OPTIONAL, PAIRED_TYPES, SESSION_TYPES, DeviceSession
 
 log = logging.getLogger("marsemu.ui")
 
@@ -102,7 +102,7 @@ class UiApp:
             raise FileNotFoundError(f"no image {name!r} in the firmware folder")
         if not info["supported"]:
             raise ValueError(f"{name}: {info['profile']} is not in the dashboard yet")
-        o = {**self.defaults, **{k: v for k, v in opts.items() if k not in ("image", "bms") and v is not None}}
+        o = {**self.defaults, **{k: v for k, v in opts.items() if k not in ("image", "bms", "mppt") and v is not None}}
         common = dict(load=float(o.get("load", 400.0)), soc=float(o.get("soc", 50.0)),
                       ambient_c=float(o.get("ambient", 22.0)), network=self.network() if self.network else None,
                       meter=self.meter, speed=float(o.get("speed", 1.0)), device_type=o.get("device_type") or None,
@@ -123,6 +123,13 @@ class UiApp:
                 extra["pv"] = pv + [0.0] * (4 - len(pv))
             if info["packs"]:
                 extra["packs"] = int(o.get("packs", 1))
+            mppt = os.path.basename(str(opts.get("mppt") or ""))
+            if mppt:
+                if not info["mppt_optional"]:
+                    raise ValueError(f"{info['model']} takes no MPPT image")
+                if not any(i["name"] == mppt and i["role"] == "mppt" for i in images):
+                    raise FileNotFoundError(f"no MPPT image {mppt!r} in the firmware folder")
+                extra["mppt"] = os.path.join(self.firmware_dir, mppt)
             self.stop()
             sess = cls(path, bms=os.path.join(self.firmware_dir, bms) if have else None, **extra, **common)
         elif info["profile"] == "ct00x":
@@ -159,7 +166,7 @@ def describe(name: str, size: int, info: dict) -> dict:
     profile, types = info.get("profile"), info.get("device_types") or []
     d = {"name": name, "size": size, "profile": profile, "device_type": info.get("device_type_default"),
          "error": info.get("error"), "role": "device", "model": None, "supported": False, "needs_bms": False,
-         "bms_optional": False, "pv_inputs": 0, "packs": False}
+         "bms_optional": False, "mppt_optional": False, "pv_inputs": 0, "packs": False}
     if profile in SESSION_TYPES:
         cls = SESSION_TYPES[profile]
         # an image lists its meters' types too: the Mini's own is VNSEMINI
@@ -180,10 +187,13 @@ def describe(name: str, size: int, info: dict) -> dict:
                     model = "Jupiter C Plus" if "JPLS" in name.upper() else "Jupiter C/E"
                 d.update(model=model, supported=True, needs_bms=cls not in BMS_OPTIONAL,
                          bms_optional=cls in BMS_OPTIONAL, device_type=hit, session=cls.__name__,
-                         pv_inputs=getattr(cls, "PV_INPUTS", 0), packs=cls.__name__ in ("VenusDSession", "VenusASession"))
+                         pv_inputs=getattr(cls, "PV_INPUTS", 0), packs=cls.__name__ in ("VenusDSession", "VenusASession"),
+                         mppt_optional=cls in MPPT_OPTIONAL)
                 break
     elif profile == "aux":
         d["role"] = "bms"
+    elif profile == "mppt":
+        d.update(role="mppt", model="MPPT board")
     return d
 
 

@@ -45,10 +45,11 @@ Anything not modelled is a plain register file. Busy-wait loops on such
 registers are broken automatically (after 200 identical reads without a write
 the value is returned inverted once and logged).
 
-## TI C2000 (Saturn M microinverter)
+## TI C2000 (Saturn M microinverter, MPPT board)
 
-The HMI runs on a TMS320F28035, not a Cortex-M, and Unicorn has no C28x, so
-`c28x/` is an emulator of its own:
+The HMI and the MPPT board of the Venus D and Jupiter C Plus run on a
+TMS320F28035, not a Cortex-M, and Unicorn has no C28x, so `c28x/` is an
+emulator of its own:
 
 * **CPU** (`c28x/isa.py`, `semantics.py`, `cpu.py`): a table-driven decoder
   of the C28x instruction set (objmode 1; ~340 forms) whose entries compile to
@@ -67,8 +68,10 @@ The HMI runs on a TMS320F28035, not a Cortex-M, and Unicorn has no C28x, so
   times slower.
 * **F2803x** (`c28x/f2803x*.py`): PIE, CPU timers, GPIO, the ADC with its
   SOC/trigger/EOC/ADCINT rules, ePWM (counters computed, not stepped; shadow
-  loads at the boundaries the firmware selects), eCAP, SCI, LIN, I2C, the
-  watchdog. The boot ROM's IQmath tables (`c28x/iqmath.py`) are computed from
+  loads at the boundaries the firmware selects), eCAP, SCI, LIN, I2C, eCAN
+  (32 mailboxes, acceptance masks, overwrite protection, both byte orders,
+  the mailbox interrupts; connected to the co-simulation's CAN bus like the
+  Cortex-M CAN controllers), the watchdog. The boot ROM's IQmath tables (`c28x/iqmath.py`) are computed from
   their definitions: the IQmath code in the application divides and takes
   square roots with seeds and limits from them. TI's OTP calibration routines
   are stubs that return what the device would.
@@ -127,7 +130,7 @@ marsemu/
   c28x/       isa.py · semantics.py · cpu.py · cla.py · machine.py · f2803x*.py · iqmath.py · _c28x.c (accelerator)
   analysis/   gdbstub.py · trace.py · idle.py · b2500.py
   plant/      cosim.py · canbus.py · remote.py   (multi-MCU co-simulation)
-              venus3.py · venusd.py · venusa.py · venusce.py · jupiter.py · b2500.py · hmi.py · battery.py
+              venus3.py · venusd.py · venusa.py · venusce.py · jupiter.py · b2500.py · hmi.py · mppt.py · battery.py
               venus3_cli.py (whole-device commands, CT meter, HTTP house) · hmi_cli.py
   modbus.py · uartbridge.py · b2500bus.py · extmodule.py (a real Wi-Fi module on a serial port)
   ui/        session.py (a device run for the dashboard) · server.py · addon.py · static/ (the page)

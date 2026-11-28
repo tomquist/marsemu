@@ -1,12 +1,13 @@
 """Jupiter C/E and C Plus: the real control firmware with inverter, MPPT and BMS models.
 
 The Jupiter control board (N32G45x, FC41D) talks to three units over its CAN
-bus (500 kbit/s).  The inverter and MPPT firmware is not available (the C
-Plus's V217 image is not ARM code), so they are modelled from what the control
-sends and parses (HMN-1 V142 and JPLS-8H V143, mapped in this emulator by
-answering with numbered values and reading the device's own ``cd=14`` /
-``cd=1`` status reports).  The BMS is a model too, or for the C Plus the real
-BMS firmware (JPLS-8H V37, see :class:`CPlusBmsFrontEnd`):
+bus (500 kbit/s).  The inverter firmware is not available, so the inverter is
+modelled from what the control sends and parses (HMN-1 V142 and JPLS-8H V143,
+mapped in this emulator by answering with numbered values and reading the
+device's own ``cd=14`` / ``cd=1`` status reports); so is the MPPT, unless the
+C Plus's MPPT firmware is given (JPLS-8H 213/217, a C2000 image: see
+:mod:`marsemu.plant.mppt`).  The BMS is a model too, or for the C Plus the
+real BMS firmware (JPLS-8H V37/V38, see :class:`CPlusBmsFrontEnd`):
 
 * **inverter** - class 1 node 1 (``0x0001110x``), replies from ``0x11``
 * **MPPT** - class 2 node 1 (``0x0001210x``), replies from ``0x21``
@@ -56,7 +57,10 @@ Commands to the inverter and MPPT (frame index in id bits 24-28):
             known; real units report about 220 and 165)
   ========  ==================================================================
 
-* ``0xCB`` version: ``index 1`` frame, version in byte 4
+* ``0xCB`` version: ``index 1`` frame, version in byte 4 (the model; the C
+  Plus's MPPT firmware answers ``<u16 210, u16 version, 0xFFFF, 1>``)
+* ``0x04``: restart (the C Plus control sends it to the MPPT about 11 s after
+  boot; the MPPT firmware restarts through its watchdog)
 """
 from __future__ import annotations
 
@@ -292,14 +296,16 @@ class CPlusBmsFrontEnd(DBmsFrontEnd):
 
 class Jupiter:
     """A Jupiter (C/E, C Plus) on one timeline: control firmware + inverter, MPPT
-    and BMS models.  ``bms``: the C Plus BMS image, run instead of the BMS model."""
+    and BMS models.  ``bms``: the C Plus BMS image, run instead of the BMS model;
+    ``mppt``: the C Plus MPPT image, run instead of the MPPT model."""
 
     CAPACITY_AH = 100.0
     CELLS = 16
 
     def __init__(self, control, bms=None, *, pv: Sequence[float] = (0, 0, 0, 0), pack: Optional[LfpPack] = None,
                  stage: Optional[PowerStage] = None, control_kwargs: Optional[dict] = None,
-                 bms_kwargs: Optional[dict] = None, slice_s: float = 0.005, realtime: bool = False, **_ignored):
+                 bms_kwargs: Optional[dict] = None, slice_s: float = 0.005, realtime: bool = False,
+                 mppt=None, mppt_kwargs: Optional[dict] = None, parallel: bool = True, **_ignored):
         from ..emulator import Emulator
         self.sim = CoSim(slice_s=slice_s, realtime=realtime)
         self.bus = CanBus(500_000)
@@ -309,7 +315,13 @@ class Jupiter:
         self.sim.add_emulator(self.control)
         self.control_can = self.bus.attach(EmulatorCanNode(self.control, "CAN1", "control"))
         self.micro = self.bus.attach(JupiterInverter(self.sim, self.pack, stage))
-        self.mppt = self.bus.attach(JupiterMppt(self.sim, self.pack, pv, version=206))
+        if mppt is not None:
+            # the C Plus's MPPT board with its firmware (JPLS-8H 213/217), see plant/mppt.py
+            from .mppt import firmware_mppt
+            self.mppt = firmware_mppt(self.sim, self.bus, mppt, self.pack, pv, parallel=parallel,
+                                      kwargs=mppt_kwargs)
+        else:
+            self.mppt = self.bus.attach(JupiterMppt(self.sim, self.pack, pv, version=206))
         self.bms = self.bms_emu = self.front = None
         if bms is None:
             self.bms = self.bus.attach(PylonBms(self.sim, self.pack))

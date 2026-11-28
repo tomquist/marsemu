@@ -106,12 +106,14 @@ def build(m: C28xMachine, models: Optional[Dict[str, type]] = None) -> None:
     from . import f2803x_adc as adcp
     from . import f2803x_comm as comm
     from .cla import Cla
+    from .f2803x_can import ECan
     from . import f2803x_pwm as pwm
     m.gpio = sysp.GpioPorts(m)
     std = {"SYSCTRL": sysp.SysCtrl, "PIE": sysp.Pie, "CPUTIMER": sysp.CpuTimers, "GPIOCTRL": sysp.GpioCtrl,
            "GPIODAT": sysp.GpioData, "ADC": adcp.Adc, "ADCRESULT": adcp.AdcResult, "COMP1": adcp.Comparator,
            "COMP2": adcp.Comparator, "COMP3": adcp.Comparator, "SCIA": comm.Sci, "LINA": comm.Lin,
-           "I2CA": comm.I2c, "CLA1": Cla, "ECAP1": pwm.Ecap}
+           "I2CA": comm.I2c, "CLA1": Cla, "ECAP1": pwm.Ecap,
+           "ECANA": ECan}
     std.update(models or {})
     for name, base, size in BLOCKS:
         if name.startswith("EPWM") and name not in (models or {}):
