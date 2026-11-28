@@ -55,6 +55,7 @@ static PyObject *fp_callbacks(PyObject *self, PyObject *args) {
     Fp *f = ((Core *)core)->fp;
     if (!f) { PyErr_SetString(PyExc_RuntimeError, "native peripherals not enabled"); return NULL; }
     set_cb(&f->adc.sample, sample);
+    f->adc.cache_until = 0;
     set_cb(&f->adc.listeners, listeners);
     set_cb(&f->boundary_cb, boundary);
     set_cb(&f->tz_cb, tz);
@@ -162,6 +163,71 @@ static PyObject *io_cacheable(PyObject *self, PyObject *args) {
     c->ioc[a].on = (uint8_t)on;
     c->ioc[a].epoch = c->epoch - 1;
     Py_RETURN_NONE;
+}
+
+/* fp_pwm(core) -> [(duty A, duty B, outputs enabled)] for ePWM1..7: what a board model reads */
+static PyObject *fp_pwm(PyObject *self, PyObject *args) {
+    PyObject *core;
+    if (!PyArg_ParseTuple(args, "O!", &CoreType, &core)) return NULL;
+    Core *c = (Core *)core;
+    if (!c->fp) { PyErr_SetString(PyExc_RuntimeError, "native peripherals not enabled"); return NULL; }
+    if (fp_sync_in(c) < 0) return NULL;
+    PyObject *l = PyList_New(7);
+    if (!l) return NULL;
+    for (int k = 1; k <= 7; k++) {
+        NEpwm *e = EP(c, k);
+        double a = ep_duty(c, e, 0), b = ep_duty(c, e, 1);
+        PyList_SET_ITEM(l, k - 1, Py_BuildValue("(ddO)", a, b, e->tz_forced ? Py_False : Py_True));
+    }
+    return l;
+}
+
+/* fp_invalidate(core): the board's readings changed (new inputs): ask again */
+static PyObject *fp_invalidate(PyObject *self, PyObject *args) {
+    PyObject *core;
+    if (!PyArg_ParseTuple(args, "O!", &CoreType, &core)) return NULL;
+    if (((Core *)core)->fp) ((Core *)core)->fp->adc.cache_until = 0;
+    Py_RETURN_NONE;
+}
+
+/* spin_enable(core, on) -> None; spin_stats(core) -> (skips, cycles skipped) */
+static PyObject *spin_enable(PyObject *self, PyObject *args) {
+    PyObject *core;
+    int on;
+    if (!PyArg_ParseTuple(args, "O!p", &CoreType, &core, &on)) return NULL;
+    Core *c = (Core *)core;
+    if (c->spin) { PyMem_Free(c->spin->cstamp); PyMem_Free(c->spin->wgen); PyMem_Free(c->spin->sgen); }
+    PyMem_Free(c->spin);
+    c->spin = NULL;
+    if (!on) Py_RETURN_NONE;
+    Spin *s = PyMem_Calloc(1, sizeof(Spin));
+    if (!s) return PyErr_NoMemory();
+    s->cstamp = PyMem_Calloc(SPIN_MEM, sizeof *s->cstamp);
+    s->wgen = PyMem_Calloc(SPIN_MEM, sizeof *s->wgen);
+    s->sgen = PyMem_Calloc(SPIN_MEM, sizeof *s->sgen);
+    if (!s->cstamp || !s->wgen || !s->sgen) {
+        PyMem_Free(s->cstamp); PyMem_Free(s->wgen); PyMem_Free(s->sgen); PyMem_Free(s);
+        return PyErr_NoMemory();
+    }
+    s->wcount = s->global = 1;
+    s->armed = 0xFFFFFFFFu;
+    c->spin = s;
+    Py_RETURN_NONE;
+}
+
+static PyObject *spin_stats(PyObject *self, PyObject *args) {
+    PyObject *core;
+    if (!PyArg_ParseTuple(args, "O!", &CoreType, &core)) return NULL;
+    Spin *s = ((Core *)core)->spin;
+    if (!s) return Py_BuildValue("(KLK[])", 0ULL, 0LL, 0ULL);
+    PyObject *l = PyList_New(0);
+    for (int i = 0; i < SPIN_HEADS; i++)
+        if (s->proofs[i].valid) {
+            PyObject *t = Py_BuildValue("(ki)", (unsigned long)s->proofs[i].pc, s->proofs[i].n);
+            PyList_Append(l, t);
+            Py_DECREF(t);
+        }
+    return Py_BuildValue("(KLKN)", (unsigned long long)s->skips, (long long)s->skipped, (unsigned long long)s->proofs_made, l);
 }
 
 static PyObject *u64_list(const uint64_t *v, int n) {

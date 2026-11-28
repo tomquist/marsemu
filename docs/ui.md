@@ -40,7 +40,7 @@ data from the running firmware:
 Every device marsemu models. Pick the image on the start screen; devices
 with a BMS image of their own take it too, and the Venus D and the Jupiter
 the MPPT board's image if it is in the folder (the device then runs at
-about 0.8× real time instead of 1.5×).
+about real time instead of 1.5×).
 
 | Device | Images | What the view shows |
 |---|---|---|

@@ -357,6 +357,7 @@ static int exec1(Core *c, Entry *e, uint32_t at) {
     case K_ESTOP0: case K_ESTOP1: case K_ABORTI: break;
     case K_ZAPA: c->acc = c->p = 0; c->ovc = 0; c->n = 0; c->z = 1; break;
     case K_IACK:
+        if (c->spin && !c->spin->event) c->spin->bad = 1;
         if (c->fp) { cla_iack(c, C); if (c->err) return -1; }
         else if (c->cb_iack != Py_None) {
             sync_clock(c);

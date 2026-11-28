@@ -265,6 +265,11 @@ class C28xMachine:
         """Watchdog interrupt (WAKEINT, PIE 1.8)."""
         self.pie.raise_irq(1, 8)
 
+    def pwm_outputs(self) -> list:
+        """(duty A, duty B, outputs enabled) of ePWM1..7, for board models
+        (one call into the native peripherals when they are in the core)."""
+        return [(e.duty("A"), e.duty("B"), e.outputs_enabled()) for e in self.epwm[1:8]]
+
     def _earlier(self, when: int) -> None:
         self.cpu.limit = when
 

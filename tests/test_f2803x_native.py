@@ -126,3 +126,58 @@ def test_native_cla_dispatch_matches():
                     tobits_(m.cla.mr[0]), m.cpu.ifr, cla.read16(0x1400 + 0x26)))
     assert res[0] == res[1]
     assert res[0][1] == 1 and res[0][6] == 0x3F800000 and res[0][2] == 1
+
+
+# ------------------------------------------------------------- polling loops
+FLAG, COUNT = 0x8410, 0x8411
+#: waits for FLAG == 1, then counts in COUNT and clears FLAG, forever
+POLL = [0x761F, 0x0210,          # MOVW DP,#0x210   (0x8400)
+        0x9210,                  # L: MOV AL,@0x10  (FLAG)
+        0x5201,                  # CMPB AL,#1
+        0x60FE,                  # SB L,NEQ
+        0x0A11,                  # INC @0x11        (COUNT)
+        0x2B10,                  # MOV @0x10,#0
+        0x6FFB]                  # SB L,UNC
+#: counts in COUNT on every pass: an effect, never skipped
+BUSY = [0x761F, 0x0210, 0x0A11, 0x6FFF]
+
+
+def spin_machine(words, spin=True):
+    from marsemu.c28x.cpu import accelerate
+    m = C28xMachine()
+    build(m)
+    m.cpu.mem[0x8000:0x8000 + len(words)] = __import__("array").array("H", words)
+    m.entry = 0x8000
+    m.reset()
+    if not accelerate(m.cpu):
+        pytest.skip("the native C28x core is not built")
+    from marsemu.c28x import _c28x
+    _c28x.spin_enable(m.cpu._core, spin)
+    m.cpu.intm = 0        # main-program code: polling loops are looked for with interrupts enabled
+    return m, _c28x
+
+
+def test_a_polling_loop_that_changes_nothing_is_skipped_until_what_it_reads_changes():
+    m, fp = spin_machine(POLL)
+    m.run(cycles=200_000)
+    skips, skipped, proofs, _ = fp.spin_stats(m.cpu._core)
+    assert m.cpu.mem[COUNT] == 0
+    assert proofs >= 1 and skipped > 150_000
+    assert m.cpu._core.insn_count < 2000              # instead of ~40000
+    # a word the loop reads changes (from Python, as a peripheral or a board model would)
+    m.clock.at(m.clock.cycles + 5000, lambda: m.cpu.wr16(FLAG, 1), "flag")
+    m.run(cycles=4990)
+    assert m.cpu.mem[COUNT] == 0
+    m.run(cycles=60)
+    assert m.cpu.mem[COUNT] == 1 and m.cpu.mem[FLAG] == 0          # seen within a pass
+    m.run(cycles=100_000)
+    assert m.cpu.mem[COUNT] == 1
+
+
+def test_a_loop_with_an_effect_runs_every_pass():
+    ref, _ = spin_machine(BUSY, spin=False)
+    m, fp = spin_machine(BUSY)
+    ref.run(cycles=50_000)
+    m.run(cycles=50_000)
+    assert m.cpu.mem[COUNT] == ref.cpu.mem[COUNT] > 1000
+    assert fp.spin_stats(m.cpu._core)[0] == 0

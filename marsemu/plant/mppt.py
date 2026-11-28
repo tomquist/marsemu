@@ -63,7 +63,7 @@ CH_VREF, CH_BAT_V, CH_BAT_I, CH_PE = 0, 2, 4, 6
 CH_PV = ((8, 9), (10, 11), (12, 13), (14, 15))
 ADC_NOISE = 2
 #: how often the board's readings are worked out afresh, s
-REFRESH_S = 50e-6
+REFRESH_S = 100e-6
 MPPT_ADDR = 0x21
 
 
@@ -95,9 +95,10 @@ class BoostInput:
             return 0.0, False
         return e.duty("A"), e.duty("B") > 0.0
 
-    def step(self, dt: float, v_bat: float) -> None:
+    def step(self, dt: float, v_bat: float, sw=None) -> None:
+        """``sw``: (low-side duty, rectifier on) if the caller has read them."""
         arr = self.array
-        d, sync = self.switching()
+        d, sync = sw if sw is not None else self.switching()
         voc = arr.voc if arr.isc > 0 else 0.0
         if d <= 0.0 and not sync:
             # stage off: the string sits at open circuit, or feeds the
@@ -168,8 +169,10 @@ class MpptPlant:
             return
         self._t = now
         p = 0.0
-        for s in self.inputs:
-            s.step(dt, self.v_bat)
+        outs = self.m.pwm_outputs()
+        for k, s in enumerate(self.inputs):
+            a, b, on = outs[k]
+            s.step(dt, self.v_bat, (a, b > 0.0) if on else (0.0, False))
             p += s.p * (s.efficiency if s.p > 0 else 1.0 / s.efficiency)
         self.dc_power = p
         self.i_bat = p / self.v_bat if self.v_bat > 1 else 0.0
@@ -186,12 +189,13 @@ class MpptPlant:
             self._refresh_adc()
         return self._adc_vals[ch]
 
-    def _adc_batch(self, mask: int) -> List[int]:
+    def _adc_batch(self, mask: int):
+        """All 16 readings, and until when they hold (the next refresh)."""
         cyc = self.clock.cycles
         if not 0 <= cyc - self._adc_cyc < self._refresh_cycles:
             self._adc_cyc = cyc
             self._refresh_adc()
-        return self._adc_vals
+        return self._adc_vals, self._adc_cyc + self._refresh_cycles
 
     def _noise(self) -> int:
         self._rng = (self._rng * 1103515245 + 12345) & 0x7FFFFFFF

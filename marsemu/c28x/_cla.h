@@ -27,7 +27,7 @@ static inline uint32_t cla_rd32(Core *c, uint32_t a) {
 }
 static inline void cla_wr32(Core *c, uint32_t a, uint32_t v) {
     a &= 0xFFFE;
-    if (c->ptype[a >> 6] == PT_RAM) { c->mem[a] = v & M16; c->mem[a + 1] = v >> 16; return; }
+    if (c->ptype[a >> 6] == PT_RAM) { mem_set(c, a, v & M16); mem_set(c, a + 1, v >> 16); return; }
     wr16(c, a, v & M16);
     wr16(c, a + 1, v >> 16);
 }
@@ -110,6 +110,12 @@ static int cla_step(Core *c, Cla *s, uint32_t pc, uint32_t msw, uint32_t lsw, in
         }
         return 0;
     }
+    /* the most frequent ones first (no earlier test below matches them) */
+    switch (msw & 0xFFFC) {
+    case 0x7840: s->mr[msw & 3] = lsw << 16; return 0;                                   /* MMOVIZ */
+    case 0x7880: s->mr[msw & 3] = (s->mr[msw & 3] & 0xFFFF0000u) | lsw; return 0;         /* MMOVXI */
+    }
+    if ((msw & 0xFFE0) == 0x7980 || (msw & 0xFFF0) == 0x79A0) return 2;                   /* branches */
     int a = (msw >> 4) & 3, mode = msw & 0xF;
     if ((msw & 0xFC00) == 0x7000) {
         int cnd = (msw >> 6) & 0xF;
@@ -275,12 +281,25 @@ static PyObject *cla_state(PyObject *self, PyObject *args) {
 }
 
 /* run a task from entry to MSTOP at the core's current time; 0, or -1 on an error */
+static int cla_exec_(Core *c, uint32_t entry, long *steps_out, long *unknown_out);
+
+/* the CLA's reads and writes are never part of a CPU loop's pass */
 static int cla_exec(Core *c, uint32_t entry, long *steps_out, long *unknown_out) {
+    int was = c->spin ? c->spin->event : 0;
+    if (c->spin) c->spin->event = 1;
+    int r = cla_exec_(c, entry, steps_out, unknown_out);
+    if (c->spin) c->spin->event = was;
+    return r;
+}
+
+static int cla_exec_(Core *c, uint32_t entry, long *steps_out, long *unknown_out) {
     Cla *sp = &c->cla;
 #define s (*sp)
     uint32_t pc = entry;
-    int hist[4][5];
-    for (int i = 0; i < 4; i++) { hist[i][0] = s.nf; hist[i][1] = s.zf; hist[i][2] = s.tf; hist[i][3] = s.luf; hist[i][4] = s.lvf; }
+    /* the flags of the last four instructions, packed (a branch decides on the oldest) */
+#define CLA_FL ((uint8_t)(s.nf | s.zf << 1 | s.tf << 2 | s.luf << 3 | s.lvf << 4))
+    uint8_t hist[4], fl = CLA_FL;      /* fl: the flags now (MNOP leaves them) */
+    for (int i = 0; i < 4; i++) hist[i] = fl;
     int hp = 0;
     int pend_n[2] = {0, 0}; uint32_t pend_v[2] = {0, 0}; int pend_r[2] = {-1, -1}; int npend = 0;
     int br_left = 0; uint32_t br_tgt = 0;
@@ -295,12 +314,16 @@ static int cla_exec(Core *c, uint32_t entry, long *steps_out, long *unknown_out)
             }
         }
         uint32_t lsw = c->mem[pc & M22], msw = c->mem[(pc + 1) & M22];
-        hist[hp][0] = s.nf; hist[hp][1] = s.zf; hist[hp][2] = s.tf; hist[hp][3] = s.luf; hist[hp][4] = s.lvf;
+        hist[hp] = fl;
         hp = (hp + 1) & 3;
-        int old[5]; memcpy(old, hist[hp], sizeof old);
-        int mreg; uint32_t mval;
-        int r = cla_step(c, sp, pc, msw, lsw, &mreg, &mval);
-        if (c->err) return -1;
+        uint8_t old = hist[hp];
+        int mreg = -1; uint32_t mval = 0;
+        int r = 0;
+        if (msw != 0x7FA0) {           /* MNOP (the pipeline padding: much of a task) does nothing */
+            r = cla_step(c, sp, pc, msw, lsw, &mreg, &mval);
+            if (c->err) return -1;
+            fl = CLA_FL;
+        }
         if (r == -1) { unknown = (long)pc; break; }
         if (mreg >= 0 && npend < 2) { pend_r[npend] = mreg; pend_v[npend] = mval; pend_n[npend] = 3; npend++; }
         if (r == 1) {
@@ -309,7 +332,7 @@ static int cla_exec(Core *c, uint32_t entry, long *steps_out, long *unknown_out)
         }
         if (r == 2) {
             int cnd = msw & 0xF;
-            if (cla_cond(cnd, old[0], old[1], old[2], old[3], old[4])) {
+            if (cla_cond(cnd, old & 1, old >> 1 & 1, old >> 2 & 1, old >> 3 & 1, old >> 4 & 1)) {
                 if ((msw & 0xFFF0) == 0x79A0) br_tgt = 0x9000 + s.mrpc;
                 else {
                     int32_t off = (int16_t)lsw;
@@ -324,6 +347,7 @@ static int cla_exec(Core *c, uint32_t entry, long *steps_out, long *unknown_out)
         }
         pc += 2;
     }
+#undef CLA_FL
 #undef s
     *steps_out = steps;
     *unknown_out = unknown;

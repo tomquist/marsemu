@@ -71,7 +71,9 @@ typedef struct {
     uint16_t cont;              /* ADCINTn continuous (bit n) */
     uint32_t starts[3];         /* ADCINT1/2 -> SOCs they start */
     int starts_valid;
-    PyObject *sample;           /* fn(channel mask) -> 16 values, or NULL: all 0 */
+    PyObject *sample;           /* fn(channel mask) -> 16 values, or (16 values, valid until cycle); NULL: all 0 */
+    uint32_t cache[16];         /* the board's values while they are valid */
+    int64_t cache_until;
     PyObject *listeners;        /* fn(n) for Python ADCINT listeners, or NULL */
 } NAdc;
 
@@ -349,24 +351,43 @@ static void adc_convert(Core *c) {
         if (ch == 5 && (ctl1 & 1)) continue;
         need |= 1u << ch;
     }
-    if (need && d->sample) {
+    uint64_t spin_g = c->spin ? c->spin->global : 0;     /* the board model changes no memory */
+    if (need && d->sample && c->cycles < d->cache_until) {
+        memcpy(vals, d->cache, sizeof vals);
+    } else if (need && d->sample) {
         /* the board model only reads: cached IO reads stay valid */
         uint32_t ep = c->epoch;
         sync_clock(c);
         c->epoch = ep;
         PyObject *r = PyObject_CallFunction(d->sample, "k", (unsigned long)need);
         if (!r) { c->err = 1; return; }
+        int64_t until = -1;
+        if (PyTuple_Check(r) && PyTuple_GET_SIZE(r) == 2) {
+            /* (values, valid until): the board's readings hold until then */
+            until = PyLong_AsLongLong(PyTuple_GET_ITEM(r, 1));
+            PyObject *v0 = PyTuple_GET_ITEM(r, 0);
+            Py_INCREF(v0);
+            Py_DECREF(r);
+            r = v0;
+        }
         PyObject *seq = PySequence_Fast(r, "sample() returns 16 values");
         Py_DECREF(r);
         if (!seq) { c->err = 1; return; }
         Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
         for (Py_ssize_t i = 0; i < n && i < 16; i++) {
             long v = PyLong_AsLong(PySequence_Fast_GET_ITEM(seq, i));
-            vals[i] = (uint32_t)v;
             if (v == -1 && PyErr_Occurred()) { Py_DECREF(seq); c->err = 1; return; }
             vals[i] = (uint32_t)(int32_t)v;
         }
         Py_DECREF(seq);
+        if (PyErr_Occurred()) { c->err = 1; return; }
+        if (c->spin) c->spin->global = spin_g;
+        if (until > c->cycles && n >= 16) {
+            memcpy(d->cache, vals, sizeof vals);
+            d->cache_until = until;
+        } else {
+            d->cache_until = 0;
+        }
     }
     NEoc e;
     e.n = 0;
@@ -383,7 +404,7 @@ static void adc_convert(Core *c) {
         v += off;
         v = v < 0 ? 0 : (v > 4095 ? 4095 : v);
         d->result[i] = (uint16_t)v;
-        c->mem[0x0B00 + i] = (uint16_t)v;
+        mem_set(c, 0x0B00 + i, (uint16_t)v);
         d->rr = i;
         t += ((ctl & 0x3F) + 14) * div;
         e.order[e.n++] = (uint8_t)i;
@@ -449,7 +470,7 @@ static void adc_reset(Core *c) {
     d->maps_valid = 0;
     d->starts_valid = 0;
     memset(d->result, 0, sizeof d->result);
-    for (int i = 0; i < 16; i++) c->mem[0x0B00 + i] = 0;
+    for (int i = 0; i < 16; i++) mem_set(c, 0x0B00 + i, 0);
     memset(d->socctl, 0, sizeof d->socctl);
     d->pending = d->intflg = d->intovf = 0;
     d->rr = 15;
@@ -891,21 +912,24 @@ static int fp_due(Core *c) {
         if (f->adc.conv_t < best) { best = f->adc.conv_t; what = 200; }
         if (f->cla.end_t < best) { best = f->cla.end_t; what = 300; }
         if (what < 0 || best > c->cycles) { fp_recalc(c); break; }
+        int was = c->spin ? c->spin->event : 0;
+        if (c->spin) c->spin->event = 1;      /* what events read and write is not part of a pass */
+        int rc = 0;
         if (what <= 7) {
-            if (ep_boundary(c, EP(c, what), f->ep[what].ev_kind) < 0) return -1;
+            rc = ep_boundary(c, EP(c, what), f->ep[what].ev_kind);
         } else if (what < 200) {
             NEoc e = f->adc.eoc[what - 100];
             for (int j = what - 100 + 1; j < f->adc.neoc; j++) f->adc.eoc[j - 1] = f->adc.eoc[j];
             f->adc.neoc--;
             fp_recalc(c);
-            if (adc_eoc(c, &e) < 0) return -1;
+            rc = adc_eoc(c, &e);
         } else if (what == 200) {
             adc_convert(c);
-            if (c->err) return -1;
         } else {
             cla_task_end(c);
-            if (c->err) return -1;
         }
+        if (c->spin) c->spin->event = was;
+        if (rc < 0 || c->err) return -1;
         fp_recalc(c);
     }
     return c->err ? -1 : 0;

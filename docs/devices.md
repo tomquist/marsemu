@@ -221,8 +221,9 @@ The inverter firmware is not available, so the inverter is a model built
 from what the control sends and parses (mapped by answering with numbered
 values and reading the device's own `cd=14`/`cd=1` reports). The MPPT and the
 BMS are models as well, except on the Jupiter C Plus (JPLS-8H): its BMS
-firmware (V37, V38) runs on a model of its board (the Venus D's KA49503 front
-end and EEPROM, with the master pack address), and its MPPT firmware (213,
+firmware (V37, V38) runs in its own process on a model of its board (the
+Venus D's KA49503 front end and EEPROM, with the master pack address), and its
+MPPT firmware (213,
 217) on the [MPPT board](#mppt-board-venus-d-jupiter-c-plus) model:
 
 ```bash
@@ -297,10 +298,12 @@ starts its strings one after the other. The C Plus control restarts the MPPT
 once about 11 s after boot (`0x04`); the firmware restarts through its
 watchdog, as the real board does.
 
-The MPPT board runs at about 0.9× real time on its own, and a Venus D or
-Jupiter C Plus with it at about 0.8× (4-core machine), against 1.5× and more
-with the MPPT model. That needs the native accelerator (see the Saturn M
-below); without it the board runs at a small fraction of real time.
+The MPPT board runs at about 1.1–1.3× real time on its own. A Venus D with
+it runs at about real time, a Jupiter C Plus at about 0.9× (its MPPT image
+does a quarter more work); measured on a 4-core 2.1 GHz cloud VM, a desktop
+is faster. With the MPPT model they run at 1.5× and more. That needs the
+native accelerator (see the Saturn M below); without it the board runs at a
+small fraction of real time.
 
 ## B2500
 

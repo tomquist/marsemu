@@ -294,6 +294,10 @@ class CPlusBmsFrontEnd(DBmsFrontEnd):
         self.eeprom.mem[self.ADDRESS:self.ADDRESS + 4] = bytes([0x00, 0xAA, 0xFF, 0x55])
 
 
+def _cplus_front(emu, pack, index=0):
+    return CPlusBmsFrontEnd(emu, pack)
+
+
 class Jupiter:
     """A Jupiter (C/E, C Plus) on one timeline: control firmware + inverter, MPPT
     and BMS models.  ``bms``: the C Plus BMS image, run instead of the BMS model;
@@ -323,8 +327,21 @@ class Jupiter:
         else:
             self.mppt = self.bus.attach(JupiterMppt(self.sim, self.pack, pv, version=206))
         self.bms = self.bms_emu = self.front = None
+        #: the C Plus BMS firmware runs (in its own process with ``parallel``, else here)
+        self.bms_firmware = bms is not None
         if bms is None:
             self.bms = self.bus.attach(PylonBms(self.sim, self.pack))
+        elif parallel:
+            from .remote import RemoteMcu
+            from .venus3 import _build_bms
+            kw = {"profile": "aux", **(bms_kwargs or {})}
+            if isinstance(bms, str):
+                bms = open(bms, "rb").read()
+            p = self.pack
+            self.bms_can = self.bus.attach(RemoteMcu(
+                "bms", _build_bms, (bms, kw, _cplus_front, 0), "CAN1",
+                state=lambda: (p.cell_voltages, p.temp_c, p.current_a, None)))
+            self.sim.add_remote(self.bms_can)
         else:
             kw = {"profile": "aux", **(bms_kwargs or {})}
             self.bms_emu = Emulator(bms, **kw)
@@ -363,6 +380,16 @@ class Jupiter:
     def ac_power(self) -> float:
         return self.micro.ac_power
 
+    def mos(self) -> dict:
+        """The C Plus BMS firmware's MOSFETs ({} with the BMS model)."""
+        if self.front is not None:
+            return self.front.mos()
+        if not self.bms_firmware:
+            return {}
+        r = dict(getattr(self.bms_can, "report", None) or {})
+        r.pop("chain_out", None)
+        return r
+
     def status(self) -> dict:
         mi = self.micro
         return {
@@ -370,7 +397,7 @@ class Jupiter:
             "dc_w": round(mi.dc_power, 1), "soc": round(self.pack.soc * 100, 2), "bms_soc": mi.bms_soc,
             "pack_v": round(self.pack.voltage, 2), "i_a": round(self.pack.current_a, 2), "bms_i_a": mi.bms_i,
             "limits": [round(x) for x in mi.limits()], "connected": mi.connected,
-            "mos": self.front.mos() if self.front else {},
+            "mos": self.mos(),
             "temp_c": round(self.pack.temp_c, 1), "pv_w": round(sum(self.mppt.pv_w), 1),
             "pv_limit_w": self.mppt.limit_w,
         }

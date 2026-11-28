@@ -92,6 +92,20 @@ emulator of its own:
   execute the same instructions either way. `MARSEMU_PY_PERIPHERALS=1` keeps
   the Python models. The MPPT board runs about 5× faster this way, the HMI
   about 2× (its board model is most of the rest).
+* **Polling loops** (`spin_at` in `_c28x.c`): main loops that poll and find
+  nothing to do are skipped to the next event. The core records one pass of
+  a loop from a backward branch target back to it: the RAM words it read
+  before writing them and the words it wrote (free stack above the SP it
+  started with aside), and whether it did anything else (I/O other than
+  cached reads, a Python call, an interrupt). A pass that ends with the
+  registers it started with and changed nothing proves that from there, with
+  those registers and those words unchanged, the code runs the same pass
+  again; every RAM word carries the time of its last change, so the proof is
+  checked again at each arrival, also after an interrupt whose handler left
+  those words alone. The only difference is that the next event is then
+  taken at its exact cycle rather than at the next instruction boundary, so
+  the comparisons with the Python models run with `MARSEMU_NO_SPIN_SKIP=1`.
+  The MPPT firmware executes about 40% fewer instructions this way.
 * **Event timing**: an event scheduled while the CPU runs a slice (an ADC
   conversion a register write forces, a UART byte) ends the slice at its
   time, so it is not taken late.

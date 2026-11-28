@@ -927,9 +927,9 @@ class JupiterSession(VenusBoardSession):
         bms.update({k: v for k, v in {"soc": mi.bms_soc, "v": mi.bms_v, "a": mi.bms_i, "charge_v": mi.bms_chg_v,
                                        "charge_a": mi.bms_chg_i, "discharge_a": mi.bms_dis_i,
                                        "flags": mi.bms_flags}.items() if v})
-        real = d.front is not None
-        mos = d.front.mos() if real else {"charge": True, "discharge": True}
-        bms.update(mos=mos, real=real, process="this process" if real else "model (Pylontech-style frames)")
+        real = d.bms_firmware
+        mos = d.mos() if real else {"charge": True, "discharge": True}
+        bms.update(mos=mos, real=real, process=("this process" if d.front is not None else "own process") if real else "model (Pylontech-style frames)")
         return {"inverter": self._micro_snapshot(), "bms": bms, "packs": [], "mppt": self._mppt_snapshot(),
                 "can": self._can_snapshot()}
 

@@ -386,6 +386,9 @@ def accelerate_peripherals(m: C28xMachine) -> bool:
     m.native_poll = lambda: fpm.fp(core, OP_POLL)
     m.native_next = lambda: fpm.fp(core, OP_NEXT)
     m.native_trace = lambda on: fpm.fp(core, OP_TRACE, 1 if on else 0)
+    m.pwm_outputs = lambda: fpm.fp_pwm(core)
+    if not os.environ.get("MARSEMU_NO_SPIN_SKIP"):
+        fpm.spin_enable(core, True)
     return True
 
 
