@@ -96,7 +96,8 @@ def stage(r: dict) -> str:
         return "BLE up"
     if c.get("at"):
         return "talks to FC41D"
-    return "no FC41D traffic" if not str(r.get("profile", "")).startswith("aux") else "runs (no FC41D)"
+    no_module = str(r.get("profile", "")).startswith("aux") or r.get("profile") == "mppt"
+    return "runs (no FC41D)" if no_module else "no FC41D traffic"
 
 
 def markdown(results) -> str:

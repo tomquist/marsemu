@@ -60,6 +60,22 @@ def test_c2000_images_get_the_hmi_profile():
     assert not is_c28x_image(bytes.fromhex("7f00a70b") + b"AT+QVERSION")
 
 
+def test_c2000_images_without_a_wifi_module_get_the_mppt_profile():
+    from marsemu.profiles import detect, is_c28x_image
+    # the MPPT board: no AT commands, but its console's text one character per word
+    text = b"".join(s.encode("utf-16-le") + b"\0\0" for s in
+                    ("SOFTWARE PV1 OCP!", "Read_offset_cal_result", " MPPT_CTL_MODE_CONSTANT_STEP ",
+                     " pv_v_ref[0] = %f", " pv_v_ref[1] = %f", " cell_v_avg = %f", " cell_i_avg = %f",
+                     " CellChargeState = %u", "Choose_master_control"))
+    img = bytes.fromhex("7f00ae0b") + b"\xff" * 16 + bytes(64) + text
+    assert is_c28x_image(img) and detect(img).name == "mppt"
+    # a branch out of flash is not an F2803x application
+    assert not is_c28x_image(bytes.fromhex("7f00ae0b").replace(b"\x7f", b"\x40") + bytes(64) + text)
+    # an N32 image with the same strings (8-bit) stays an aux image
+    arm = struct.pack("<II", 0x20008000, 0x08000101) + bytes(64) + text.replace(b"\0", b"")
+    assert detect(arm).name == "aux"
+
+
 class _Board:
     """What a profile's setup hook sees of the emulator."""
 

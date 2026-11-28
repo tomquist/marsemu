@@ -45,10 +45,11 @@ Anything not modelled is a plain register file. Busy-wait loops on such
 registers are broken automatically (after 200 identical reads without a write
 the value is returned inverted once and logged).
 
-## TI C2000 (Saturn M microinverter)
+## TI C2000 (Saturn M microinverter, MPPT board)
 
-The HMI runs on a TMS320F28035, not a Cortex-M, and Unicorn has no C28x, so
-`c28x/` is an emulator of its own:
+The HMI and the MPPT board of the Venus D and Jupiter C Plus run on a
+TMS320F28035, not a Cortex-M, and Unicorn has no C28x, so `c28x/` is an
+emulator of its own:
 
 * **CPU** (`c28x/isa.py`, `semantics.py`, `cpu.py`): a table-driven decoder
   of the C28x instruction set (objmode 1; ~340 forms) whose entries compile to
@@ -67,11 +68,47 @@ The HMI runs on a TMS320F28035, not a Cortex-M, and Unicorn has no C28x, so
   times slower.
 * **F2803x** (`c28x/f2803x*.py`): PIE, CPU timers, GPIO, the ADC with its
   SOC/trigger/EOC/ADCINT rules, ePWM (counters computed, not stepped; shadow
-  loads at the boundaries the firmware selects), eCAP, SCI, LIN, I2C, the
-  watchdog. The boot ROM's IQmath tables (`c28x/iqmath.py`) are computed from
-  their definitions: the IQmath code in the application divides and takes
-  square roots with seeds and limits from them. TI's OTP calibration routines
-  are stubs that return what the device would.
+  loads at the boundaries the firmware selects), eCAP, SCI, LIN, I2C, eCAN
+  (32 mailboxes, acceptance masks, overwrite protection, both byte orders,
+  the mailbox interrupts; connected to the co-simulation's CAN bus like the
+  Cortex-M CAN controllers), the watchdog. The boot ROM's IQmath tables
+  (`c28x/iqmath.py`) are computed from their definitions: the IQmath code in
+  the application divides and takes square roots with seeds and limits from
+  them. TI's OTP calibration routines are stubs that return what the device
+  would.
+* **Native peripherals** (`c28x/_f2803x.h`, `f2803x_native.py`): the control
+  loops of the C2000 firmware run at 50–100 kHz, and every period an ePWM
+  starts the ADC, the end of conversion interrupts the CPU and starts a CLA
+  task, and both write the ePWM compare and trip-zone registers. With the
+  accelerator, the PIE, ePWM1–7, the ADC and the CLA's task dispatch run in
+  the core, a line-by-line port of the Python models; their timed events run
+  in the core's loop, and the Python objects become facades with the same
+  interface (`duty()`, `cmpa`, `adc.source`, `pie.counts`). The board models
+  hand over all analog inputs of a conversion batch at once
+  (`source.batch(mask)`). Registers a model declares `cacheable` (no side
+  effect, no dependence on time, e.g. the LIN status the firmware polls) are
+  read once until the core next calls into Python. Tests run the same
+  register scripts on both and compare, and the MPPT and HMI firmware
+  execute the same instructions either way. `MARSEMU_PY_PERIPHERALS=1` keeps
+  the Python models. The MPPT board runs about 5× faster this way, the HMI
+  about 2× (its board model is most of the rest).
+* **Polling loops** (`spin_at` in `_c28x.c`): main loops that poll and find
+  nothing to do are skipped to the next event. The core records one pass of
+  a loop from a backward branch target back to it: the RAM words it read
+  before writing them and the words it wrote (free stack above the SP it
+  started with aside), and whether it did anything else (I/O other than
+  cached reads, a Python call, an interrupt). A pass that ends with the
+  registers it started with and changed nothing proves that from there, with
+  those registers and those words unchanged, the code runs the same pass
+  again; every RAM word carries the time of its last change, so the proof is
+  checked again at each arrival, also after an interrupt whose handler left
+  those words alone. The only difference is that the next event is then
+  taken at its exact cycle rather than at the next instruction boundary, so
+  the comparisons with the Python models run with `MARSEMU_NO_SPIN_SKIP=1`.
+  The MPPT firmware executes about 40% fewer instructions this way.
+* **Event timing**: an event scheduled while the CPU runs a slice (an ADC
+  conversion a register write forces, a UART byte) ends the slice at its
+  time, so it is not taken late.
 
 `machine.py` runs it all on the same event clock as the Cortex-M machines;
 delay loops the firmware spins in (`RPT #n || NOP` with a counter) are slept
@@ -127,7 +164,7 @@ marsemu/
   c28x/       isa.py · semantics.py · cpu.py · cla.py · machine.py · f2803x*.py · iqmath.py · _c28x.c (accelerator)
   analysis/   gdbstub.py · trace.py · idle.py · b2500.py
   plant/      cosim.py · canbus.py · remote.py   (multi-MCU co-simulation)
-              venus3.py · venusd.py · venusa.py · venusce.py · jupiter.py · b2500.py · hmi.py · battery.py
+              venus3.py · venusd.py · venusa.py · venusce.py · jupiter.py · b2500.py · hmi.py · mppt.py · battery.py
               venus3_cli.py (whole-device commands, CT meter, HTTP house) · hmi_cli.py
   modbus.py · uartbridge.py · b2500bus.py · extmodule.py (a real Wi-Fi module on a serial port)
   ui/        session.py (a device run for the dashboard) · server.py · addon.py · static/ (the page)

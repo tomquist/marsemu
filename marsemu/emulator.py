@@ -182,6 +182,9 @@ class Emulator:
             if not accelerate(m.cpu):
                 log.warning("the native C28x core is not built (no C compiler at install time?): "
                             "this device runs at a small fraction of real time")
+            else:
+                from .c28x.f2803x_native import accelerate_peripherals
+                accelerate_peripherals(m)
         self.uid = uid or hashlib.sha1(image).digest()[:12]
         self.state_dir = state_dir
         self.persist: List = []

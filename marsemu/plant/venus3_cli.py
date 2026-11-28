@@ -388,6 +388,10 @@ def _add(sub, cmd: str, model: str) -> None:
         v.add_argument("bms", metavar="BMS", help=f"{model} BMS firmware image")
     if cmd in ("venusd", "venusa", "jupiter", "b2500"):
         v.add_argument("--pv", default="0", metavar="W[,W,...]", help="PV power available per input, W")
+    if cmd in ("venusd", "jupiter"):
+        v.add_argument("--mppt", metavar="FIRMWARE",
+                       help="MPPT board firmware image (Venus D: VNSD-0 MPPT 104; Jupiter C Plus: JPLS-8H 213/217), "
+                            "run instead of the MPPT model")
     if cmd in ("venusd", "venusa"):
         v.add_argument("--packs", type=int, default=1, metavar="N",
                        help="battery packs in the stack, each with its own BMS (same SOC as --soc)")
@@ -478,6 +482,8 @@ def cmd_venus3(args) -> int:
         extra["packs"] = [pack] + [LfpPack(soc=args.soc / 100.0, temp_c=args.temp, ambient_c=args.temp,
                                            capacity_ah=cls.CAPACITY_AH, cells_n=cls.CELLS)
                                    for _ in range(args.packs - 1)]
+    if getattr(args, "mppt", None):
+        extra["mppt"] = args.mppt
     if args.cmd == "b2500":
         extra["inverter_w"] = [float(x) for x in args.inverter_w.split(",")]
         extra["extension_packs"] = args.extension_packs

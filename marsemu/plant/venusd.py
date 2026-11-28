@@ -1,7 +1,9 @@
 """Venus D: Venus E 3.0 hardware plus a PV/MPPT controller on the CAN bus.
 
-The MPPT controller is a separate MCU whose firmware is not available; it is
-modelled from what the control firmware sends and parses (Control v151):
+The MPPT controller is a separate MCU (a TMS320F28035).  Its firmware (MPPT
+102.5/104) runs on a model of its board when given (:mod:`marsemu.plant.mppt`);
+otherwise :class:`MpptNode` models it from what the control firmware sends and
+parses (Control v151):
 
 * control -> MPPT (class 2, node 1): ``0x00012103`` poll (every 0.5 s),
   ``0x000121CB`` version query, ``0x000121CC`` date/time, ``0x00012102`` PV
@@ -24,6 +26,9 @@ modelled from what the control firmware sends and parses (Control v151):
   ======  ===================================================  =========
 
   The ``0xCB`` answer is ``<HHHH`` model code, version (104 on real units), …
+  (the MPPT firmware: ``<101, 104, 0xFFFF, 1>``, after a header frame), and
+  the poll answer of the firmware has a header frame (index 0, the number of
+  data frames) in front of the seven; the control takes it either way.
 
 The BMS board (:class:`DBmsFrontEnd`) has the KA49503 front end and a 24C512
 EEPROM on bit-banged I2C (PB10/PB11).  Several packs form a stack (see
@@ -187,16 +192,24 @@ class DBmsFrontEnd(BmsFrontEnd):
 
 
 class VenusD(VenusBoard):
-    """Venus D: Control 147-151, BMS 117/118 (2.56 kWh pack), Micro 115/116, MPPT (modelled)."""
+    """Venus D: Control 147-151, BMS 117/118 (2.56 kWh pack), Micro 115/116 (modelled), and the
+    MPPT: its firmware (102.5/104, ``mppt``) on a model of its board, or a model."""
 
     MICRO = MICRO_D_116
     BMS_AMPS_PER_COUNT = D_BMS_AMPS_PER_COUNT
     CAPACITY_AH = 50.0
     MAX_PACKS = 9
 
-    def __init__(self, control, bms, *, pv: Sequence[float] = (0, 0, 0, 0), **kw):
+    def __init__(self, control, bms, *, pv: Sequence[float] = (0, 0, 0, 0), mppt=None,
+                 mppt_kwargs: Optional[dict] = None, **kw):
+        """``mppt``: the MPPT board's firmware image, run instead of the model."""
         super().__init__(control, bms, **kw)
-        self.mppt = self.bus.attach(MpptNode(self.sim, self.pack, pv))
+        if mppt is not None:
+            from .mppt import firmware_mppt
+            self.mppt = firmware_mppt(self.sim, self.bus, mppt, self.pack, pv, parallel=self.parallel,
+                                      kwargs=mppt_kwargs)
+        else:
+            self.mppt = self.bus.attach(MpptNode(self.sim, self.pack, pv))
         self.dc_sources.append(self.mppt)
 
     def make_bms_front(self, emu, pack, index: int = 0):

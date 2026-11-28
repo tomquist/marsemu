@@ -5,11 +5,11 @@ What marsemu runs for each device, and what it models around the real firmware.
 | Device | Command | Real firmware | Modelled |
 |---|---|---|---|
 | Venus E 3.0 | `venus3 CONTROL BMS` | control, BMS | inverter board, pack |
-| Venus D | `venusd CONTROL BMS` | control, BMS (one per pack) | inverter, MPPT, packs |
+| Venus D | `venusd CONTROL BMS [--mppt MPPT]` | control, BMS (one per pack); MPPT with its image | inverter, packs (and MPPT without its image) |
 | Venus A | `venusa CONTROL BMS` | control, BMS (one per pack) | inverter with MPPT, packs |
 | Venus C/E | `venusce CONTROL BMS` | control, BMS | power stage at the control's pins |
 | Venus E Mini | `venusmini CONTROL` | control (with the battery management) | inverter, DC/DC, two-cell pack |
-| Jupiter C/E, C Plus | `jupiter CONTROL [BMS]` | control; C Plus: control, BMS | inverter, MPPT (and BMS without its image) |
+| Jupiter C/E, C Plus | `jupiter CONTROL [BMS] [--mppt MPPT]` | control; C Plus: control, BMS, MPPT with their images | inverter (and BMS, MPPT without their images) |
 | B2500 v2 (HMA, HMJ) | `b2500 FIRMWARE` | the one MCU | front end, PV, outputs, microinverter |
 | B2500 v1 (HMB) | `b2500 FIRMWARE` | the one MCU | front end, PV, switched outputs |
 | Saturn M microinverter (HMI) | `hmi FIRMWARE` | the one MCU (C28x CPU and CLA) | grid, relay, two PV strings, flyback power stage |
@@ -68,13 +68,15 @@ The firmware probes its phase, settles on it and regulates the grid to about
 ## Venus D
 
 Control 147–151, BMS 117/118, the inverter model with Micro 116's protocol, and
-a model of the **PV/MPPT controller**, a fourth MCU on the CAN bus whose
-firmware is not available. It answers the control's 0.5 s poll with the block
-the control copies into its MPPT registers and obeys its PV power limit and
-charge voltage; what the control does with the PV power is its own logic.
+the **PV/MPPT controller**, a fourth MCU on the CAN bus: its own firmware with
+`--mppt` (see [MPPT board](#mppt-board-venus-d-jupiter-c-plus)), or a model.
+The model answers the control's 0.5 s poll with the block the control copies
+into its MPPT registers and obeys its PV power limit and charge voltage; what
+the control does with the PV power is its own logic.
 
 ```bash
 marsemu venusd CONTROL.bin BMS.bin --pv 600[,W,W,W]
+marsemu venusd CONTROL.bin BMS.bin --mppt VNSD-0/MPPT/104/*.bin --pv 400,300   # the MPPT's firmware too
 ```
 
 ```text
@@ -215,16 +217,19 @@ the header's fields.
 
 ## Jupiter C/E and C Plus
 
-The inverter and MPPT firmware is not available, so they are models built
+The inverter firmware is not available, so the inverter is a model built
 from what the control sends and parses (mapped by answering with numbered
-values and reading the device's own `cd=14`/`cd=1` reports). The BMS is a
-model as well, except on the Jupiter C Plus (JPLS-8H), whose BMS firmware
-(V37) runs on a model of its board (the Venus D's KA49503 front end and
-EEPROM, with the master pack address):
+values and reading the device's own `cd=14`/`cd=1` reports). The MPPT and the
+BMS are models as well, except on the Jupiter C Plus (JPLS-8H): its BMS
+firmware (V37, V38) runs in its own process on a model of its board (the
+Venus D's KA49503 front end and EEPROM, with the master pack address), and its
+MPPT firmware (213,
+217) on the [MPPT board](#mppt-board-venus-d-jupiter-c-plus) model:
 
 ```bash
-marsemu jupiter JPLS-8H/143/*.bin JPLS-8H/37/*.bin --pv 300,300 --load 200   # C Plus, real BMS
-marsemu jupiter JPLS-8H/143/*.bin --pv 300,300 --load 200                    # C Plus, BMS model
+marsemu jupiter JPLS-8H/143/*.bin JPLS-8H/38/*.bin --pv 300,300 --load 200   # C Plus, real BMS
+marsemu jupiter JPLS-8H/143/*.bin JPLS-8H/38/*.bin --mppt JPLS-8H/217/*.bin --pv 400,300   # and real MPPT
+marsemu jupiter JPLS-8H/143/*.bin --pv 300,300 --load 200                    # C Plus, BMS and MPPT models
 ```
 
 The C Plus control broadcasts `0x1801FFAA` and the BMS answers with its own
@@ -244,6 +249,61 @@ per-unit calibration.
 
 The BMS model's limits (50 A, half above 95 % SOC, off when full or at 2.8 V)
 are simple rules, not firmware.
+
+## MPPT board (Venus D, Jupiter C Plus)
+
+The PV charger of the Venus D (VNSD-0 MPPT 102.5, 104) and of the Jupiter C
+Plus (JPLS-8H 213, 217; the archives file these next to the control and BMS
+images) is a TI TMS320F28035 with four PV inputs, each a synchronous boost
+stage into the battery. `--mppt` runs its firmware (profile `mppt`) on the
+C28x emulator in its own process, on the device's CAN bus, with a model of
+the board at its pins (`plant/mppt.py`):
+
+```mermaid
+flowchart LR
+    ctl["control MCU<br/>(real firmware)"] <-->|"CAN: 0x03 poll, 0x02 PV limit,<br/>0xCB version (node 0x21)"| mcu
+    mcu["TMS320F28035 (C28x + CLA)<br/>real firmware: MPPT per string,<br/>stage control loops, protections"]
+    mcu -.->|EPWM1..4 duty| boost["4 synchronous boost stages (model)"]
+    pv["PV strings 1..4"] --> boost --> pack["battery"]
+    boost -.->|ADC: string V and I,<br/>battery V and I| mcu
+```
+
+* **eCAN-A**: the firmware's mailboxes 0–15 send, 16–31 receive frames for
+  node `0x21` (and `0x20`); 500 kbit/s, least significant byte first. It
+  answers the poll with a header frame (the number of data frames, 7) and the
+  28-word status block, and the version query with `<model, version, 0xFFFF,
+  1>`: model 101 on the Venus D, 210 on the C Plus.
+* **ADC**: the string voltages and currents on B0–B7 (0.0166 V and 11/1024 A
+  per count), the battery voltage on A2 (0.0179 V), its current on A4 against
+  the sensors' reference on A0 (0.0393 A per count, + into the battery), the PE
+  voltage on A6. The scales come from the firmware's own console (`adcshow`
+  prints raw and converted values). The firmware's PV1..PV4 are the control's
+  strings 4..1.
+* **Stages**: EPWM1–4 at 50 kHz, 90° apart. The firmware's tracker sets each
+  string's voltage reference and its loop the low-side duty `D` (A); the
+  model holds the string at `(1 − D) × V_battery` through its input
+  capacitor, and the string delivers what its I-V curve gives there. Once a
+  stage runs, the firmware switches on its synchronous rectifier (B); without
+  it, current only flows into the battery. Inductance, capacitance and
+  efficiency (97.5 %) are estimates.
+* **Console**: a Letter shell on LIN-A (115200 baud): `adcshow`,
+  `mpptshow`, `dshow`, `powershow`, `canshow`, `prtshow` and more. The whole
+  device runs it in a child process; on its own (`marsemu run`, or
+  `Emulator` from Python) `--serve-uart LINA:PORT` reaches it.
+
+With 400 W and 300 W strings (open circuit 48 V, maximum at 39 V) the Venus
+D's MPPT starts within a few seconds of the control's first PV limit and
+reaches 400 and 300 W in about 8 s. The C Plus's waits about 15 s, then
+starts its strings one after the other. The C Plus control restarts the MPPT
+once about 11 s after boot (`0x04`); the firmware restarts through its
+watchdog, as the real board does.
+
+The MPPT board runs at about 1.1–1.3× real time on its own. A Venus D with
+it runs at about real time, a Jupiter C Plus at about 0.9× (its MPPT image
+does a quarter more work); measured on a 4-core 2.1 GHz cloud VM, a desktop
+is faster. With the MPPT model they run at 1.5× and more. That needs the
+native accelerator (see the Saturn M below); without it the board runs at a
+small fraction of real time.
 
 ## B2500
 
@@ -335,7 +395,7 @@ The relay closes within about 10 s of boot and both inputs feed in from about
 20 s; `cd=1` then reports the grid as 230.0 V and 50.00 Hz,
 `rel_s=1`, and around 350 W on the grid side for 550 W of PV.
 
-The whole device runs at about 0.2× real time; it needs the
+The whole device runs at about 0.4× real time; it needs the
 native accelerator, which `pip install` builds when a C compiler is present
 (the Docker images and the add-on have one).
 
@@ -391,6 +451,7 @@ started the way the bootloader would; full images run the bootloader first.
 | `ct00x` | CT002/CT003 (HME) | STM32F0-class | USART1 | reaches MQTT (the module claims the factory certificates) |
 | `hmi` | Saturn M microinverter (HMI-1/2/5/6/9/350/500), 132 | TMS320F28035 (C28x + CLA) | SCI-A | reaches MQTT (~22 s); whole device |
 | `aux` | BMS and other MCUs without an FC41D (N32) | – | – | boot; the Venus BMSes run fully with their front-end models |
+| `mppt` | MPPT board of the Venus D (102.5, 104) and Jupiter C Plus (213, 217) | TMS320F28035 (C28x + CLA) | – (eCAN-A) | whole board: tracks the strings, answers the control (about 0.9× real time) |
 | `aux-g4` | STM32G474 inverter boards (Venus D/E 3.0/E Mini "micro") | – | – | boot; the Venus D/E 3.0 ones answer the control's CAN commands; Micro 270 (Mini) runs at about 1/40 of real time |
 
 Per-image results are in [`STATUS.md`](STATUS.md), generated by
@@ -404,7 +465,9 @@ Per-image results are in [`STATUS.md`](STATUS.md), generated by
 | SOC, current limits, protections, MOSFETs (Venus) | real BMS firmware, measuring the pack model | exact given the cell model |
 | Battery front ends (KA495XX, SH36735, SH367309) | protocols from RE notes and disassembly, scaling measured against the firmware | high |
 | Venus inverter CAN protocols | captured from Micro v119/v116 in the emulator, RE notes | high |
-| Venus D MPPT, Venus A inverter + MPPT, Jupiter inverter/MPPT/BMS (no firmware) | the control firmware's parsers and senders | medium–high |
+| Venus D MPPT, Venus A inverter + MPPT, Jupiter inverter/MPPT/BMS (models, without the firmware) | the control firmware's parsers and senders | medium–high |
+| MPPT board ADC mapping and scales, CAN set-up | the firmware's console (`adcshow`, `canshow`) with each channel fed its own value | high |
+| MPPT boost stages (averaged, input-capacitor lag, efficiency) | estimates; the firmware's own tracker and loops close the loop | **calibrate against a real device** |
 | Venus E Mini inverter: protocol, regulator, modes, limits | the control's request builders and reply handlers; the regulator and the limits from the Micro 270 image | high (protocol, regulator, limits); the fault bits in `e1`..`e6` are not mapped |
 | Venus E Mini DC/DC (no firmware) | the control's reply handler and battery management, including what it commands (on/off, charge and discharge permission and limits; units checked by their use) | medium–high |
 | Venus C/E power stage | the control firmware's ADC scaling and PWM mapping; component values estimated | medium |

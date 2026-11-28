@@ -169,6 +169,12 @@ class C28xMachine:
         self.cpu.ack_hook = self._on_ack
         self.flash_size = 0
         self.peripherals["RTC"] = VirtualClockTime(self)
+        #: the native peripherals (f2803x_native): run their due events, the time
+        #: of the next one, route IO through the Python objects (tracers)
+        self.native_poll: Optional[Callable[[], object]] = None
+        self.native_next: Optional[Callable[[], int]] = None
+        self.native_trace: Optional[Callable[[bool], object]] = None
+        self._native_traced = False
 
     # ---------------------------------------------------------- peripherals
     def attach(self, p: C28xPeripheral) -> C28xPeripheral:
@@ -259,6 +265,14 @@ class C28xMachine:
         """Watchdog interrupt (WAKEINT, PIE 1.8)."""
         self.pie.raise_irq(1, 8)
 
+    def pwm_outputs(self) -> list:
+        """(duty A, duty B, outputs enabled) of ePWM1..7, for board models
+        (one call into the native peripherals when they are in the core)."""
+        return [(e.duty("A"), e.duty("B"), e.outputs_enabled()) for e in self.epwm[1:8]]
+
+    def _earlier(self, when: int) -> None:
+        self.cpu.limit = when
+
     def _on_ack(self, k: int) -> None:
         self.exc_count += 1
         self.int_count[k] += 1
@@ -324,17 +338,30 @@ class C28xMachine:
     def feeding_watchdog(self) -> bool:
         return False
 
+    def _next_deadline(self) -> Optional[int]:
+        """The next clock or native event."""
+        nd = self.clock.next_deadline()
+        if self.native_next is not None:
+            nn = self.native_next()
+            if nn < (1 << 63) - 1:
+                nd = nn if nd is None else min(nd, nn)
+        return nd
+
     def advance(self, seconds: float) -> None:
         end = self.clock.cycles + int(seconds * self.clock.hz)
         while True:
             for h in self.slice_hooks:
                 h()
-            nd = self.clock.next_deadline()
+            if self.native_poll is not None:
+                self.native_poll()
+            nd = self._next_deadline()
             if nd is None or nd > end:
                 break
             self.clock.cycles = max(self.clock.cycles, nd)
             self.clock.run_due()
         self.clock.cycles = end
+        if self.native_poll is not None:
+            self.native_poll()
 
     # ---------------------------------------------------------------- reset
     def reset(self) -> None:
@@ -365,12 +392,18 @@ class C28xMachine:
         self.stop_reason = None
         clock = self.clock
         cpu = self.cpu
+        native_poll = self.native_poll
+        if self.native_trace is not None and bool(self.tracers) != self._native_traced:
+            self._native_traced = bool(self.tracers)
+            self.native_trace(self._native_traced)
         while not self._stop:
             if self._reset_req:
                 why, self._reset_req = self._reset_req, None
                 log.warning("system reset (%s) at t=%.3fs", why, clock.seconds)
                 self.reset()
             clock.run_due()
+            if native_poll is not None:
+                native_poll()
             for h in self.slice_hooks:
                 h()
             if until is not None and until():
@@ -380,6 +413,9 @@ class C28xMachine:
                 self.stop_reason = "time"
                 break
             nd = clock.next_deadline()
+            if cpu.idle_wait or (cpu.wait_left and cpu.pc == cpu.wait_pc):
+                # time skips ahead here: not past the native peripherals' next event
+                nd = self._next_deadline() if native_poll is not None else nd
             if cpu.idle_wait:
                 if cpu.ifr & cpu.ier:
                     cpu.idle_wait = False
@@ -416,6 +452,9 @@ class C28xMachine:
             if end is not None:
                 budget = min(budget, max(1, end - clock.cycles))
             self.running = True
+            # an event scheduled during the slice, before its end, ends it there
+            clock.horizon = clock.cycles + budget
+            clock.on_earlier = self._earlier
             try:
                 cpu.run(budget)
             except CpuFault as e:
@@ -425,4 +464,6 @@ class C28xMachine:
                 break
             finally:
                 self.running = False
+                clock.horizon = 1 << 62
+                clock.on_earlier = None
         return self.stop_reason or "stopped"

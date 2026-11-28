@@ -1,8 +1,8 @@
-Survey: 65 images, 60 virtual seconds each, three at a time; images that had not subscribed by then were re-run for 150 s (`docs/survey_retry.jsonl`).
+Survey: 73 images, 60 virtual seconds each, three at a time; images that had not subscribed by then were re-run for 150 s (`docs/survey_retry.jsonl`).
 
 | Image | Profile | Result | MQTT topic | t(sub) | Resets | Speed |
 |---|---|---|---|---|---|---|
-| `Control/132/132_control_HMI-1_20251010160748845913037.bin` | hmi | MQTT subscribed | `marstek_energy/HMI-1/App/c8478c000002/ctrl` | 23.5 | 0 | 0.19× |
+| `Control/132/132_control_HMI-1_20251010160748845913037.bin` | hmi | MQTT subscribed | `marstek_energy/HMI-1/App/c8478c000002/ctrl` | 23.5 | 0 | 0.77× |
 | `Control/144/144_control_VNSE3-0_20251118161530cc2d80857.bin` | venus3 | MQTT subscribed | `marstek_energy/VNSE3-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 36.5 | 0 | 3.03× |
 | `Control/147/147_control_VNSD-0_202601281721320b2053125.bin` | venus3 | MQTT subscribed | `marstek_energy/VNSD-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 35.6 | 0 | 3.05× |
 | `Control/147/147_control_VNSE3-0_202601281724177c3442083.bin` | venus3 | MQTT subscribed | `marstek_energy/VNSE3-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 35.6 | 0 | 3.12× |
@@ -19,6 +19,7 @@ Survey: 65 images, 60 virtual seconds each, three at a time; images that had not
 | `Control/156/20251118172129117290445.bin` | venus | MQTT subscribed | `marstek_energy/HMG-1/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 40.7 | 0 | 3.05× |
 | `Control/1581/ac_app_1581_0228_1_164255.bin` | venus | MQTT subscribed | `marstek_energy/HMG-1/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 40.7 | 0 | 3.06× |
 | `Control/309/309_control_VNSEMINI-0_PMU_V135_186556_42_FF_152925.bin` | venus-mini | MQTT subscribed | `marstek_energy/VNSEMINI-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 16.0 | 0 | 1.38× |
+| `Control/401/401_control_VNSE3-0_ems_app_0401_1109_175500.bin` | venus3 | MQTT subscribed | `marstek_energy/VNSE3-0/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 40.2 | 0 | 2.80× |
 | `HMA-1/V119/B2500V2_All_V119.bin` | b2500-v2 | MQTT subscribed | `hame_energy/HMA-1/App/bd302795c3fe60028c79102e/ctrl` | 11.8 | 0 | 0.44× |
 | `HMA-1/V157/B2500V2_All_V157.bin` | b2500-v2 | MQTT subscribed | `hame_energy/HMA-1/App/b1f87b1592f1ca585819c16b/ctrl` | 14.3 | 0 | 0.41× |
 | `HMA-1/V160/B2500V2_All_V160.1.bin` | b2500-v2 | MQTT subscribed | `hame_energy/HMA-1/App/412949745d2aad3bddbb13f1/ctrl` | 15.7 | 0 | 0.42× |
@@ -66,4 +67,11 @@ Survey: 65 images, 60 virtual seconds each, three at a time; images that had not
 | `HMN-1/V140/20251204100127c5bcb0462.bin` | jupiter | MQTT subscribed | `marstek_energy/HMN-1/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 43.8 | 0 | 2.61× |
 | `HMN-1/V142/HMN-1_app_0142_0331_160115.bin` | jupiter | MQTT subscribed | `marstek_energy/HMN-1/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 43.9 | 0 | 2.63× |
 | `HMN-1/V214/20250930155858ef0ee6483.bin` | aux | runs (no FC41D) | `` |  | 0 | 1.01× |
+| `JPLS-8H/143/143_JPLS-8H_app_0143_1012_182945.bin` | jupiter | MQTT subscribed | `marstek_energy/JPLS-8H/App/69fe087914abec3a00d4841bb5a91bca/ctrl` | 44.1 | 0 | 2.20× |
+| `JPLS-8H/213/213_JPLS-8H_20250818162315786f61350.bin` | mppt | runs (no FC41D) | `` |  | 0 | 1.18× |
+| `JPLS-8H/217/217_JPLS-8H_20251014151654c62ef6524.bin` | mppt | runs (no FC41D) | `` |  | 0 | 1.22× |
+| `JPLS-8H/37/37_JPLS-8H_jp37_ota_180048.bin` | aux | runs (no FC41D) | `` |  | 0 | 4.08× |
+| `JPLS-8H/38/38_JPLS-8H_BMS_JPLS_V38_app__0716_ota_234758.bin` | aux | runs (no FC41D) | `` |  | 0 | 4.08× |
+| `MPPT/1025/1025_mppt_VNSD-0_20251011093355e11fe4918.bin` | mppt | runs (no FC41D) | `` |  | 0 | 1.51× |
+| `MPPT/104/104_mppt_VNSD-0_20251010134652a65a88005.bin` | mppt | runs (no FC41D) | `` |  | 0 | 1.55× |
 | `Micro/119/119_micro_VNSA-0_VA_inv_app_0119_0326_ota_144725.bin` | aux | runs (no FC41D) | `` |  | 0 | 2.94× |

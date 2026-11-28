@@ -227,6 +227,9 @@ class Lin(_Uart):
     reg_names.update({k + 1: v + "_H" for k, v in list(reg_names.items())})
     #: SCIFLR bits
     TXRDY, RXRDY, TXEMPTY, OE = 1 << 8, 1 << 9, 1 << 11, 1 << 25
+    #: registers whose reads have no side effect and do not depend on time
+    #: (the firmware polls SCIFLR in its main loop): see f2803x_native
+    cacheable = frozenset((0x0E, 0x0F))
 
     def __init__(self, m, name, base, size):
         super().__init__(m, name, base, size)

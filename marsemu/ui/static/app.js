@@ -43,7 +43,7 @@ let layoutKey = "";
 function fromSnap(sn) {
   SN = sn;
   // a CT002 and a CT003 share the model but not the drawing: the meter's source picks it
-  const key = sn.model + "|" + (sn.meter ? sn.meter.source : "");
+  const key = sn.model + "|" + (sn.meter ? sn.meter.source : "") + (sn.mppt && sn.mppt.real ? "|mppt" : "");
   if (sn.model !== MODEL || key !== layoutKey) { layoutKey = key; buildLayout(sn.model, sn.channels); }
   S.t = sn.t; S.load = sn.load; S.grid = sn.grid; S.ac = sn.ac; S.f = sn.faults; S.ext = sn.ext || [];
   if (!sn.pack) {                       // the CT meter and the HMI: no pack
@@ -322,7 +322,8 @@ function buildVenus(variant) {
     COMP.modbus = { x: 30, y: 196, w: 140, h: 60, t: "MODBUS CLIENT", kind: "ext" };
   }
   if (pv) {
-    COMP.mppt = { x: 770, y: 352, w: 160, h: 76, t: FV.mppt, kind: "model" };
+    const real = !!(SN && SN.mppt && SN.mppt.real);
+    COMP.mppt = { x: 770, y: 352, w: 160, h: 76, t: real ? "F28035 · MPPT" : FV.mppt, kind: real ? "real" : "model" };
     for (let k = 0; k < 4; k++) COMP["string" + (k + 1)] = { x: 995 + (k % 2) * 82, y: 210 + Math.floor(k / 2) * 84, w: 74, h: 72, t: `PV ${k + 1}`, kind: "ext" };
   }
   POWER = {
@@ -1073,6 +1074,7 @@ const DESC_V = {
   bat2: ["Battery 2", "A virtual battery that polls the meter over UDP every 2.7 s, as a real one does.", "ext"],
   bat3: ["Battery 3", "A virtual battery that polls the meter over UDP every 2.7 s, as a real one does.", "ext"],
 };
+const MPPT_REAL = ["F28035 MPPT board", "Runs the unmodified MPPT firmware on a model of its board: four PV strings, each a synchronous boost stage into the battery. Its own tracker finds each string's maximum power point; it answers the control's polls and obeys its PV limit and charge voltage. In its own process.", "real"];
 const TITLES = {
   "Venus D": { afe: ["KA49503 battery front end", "Model of the pack's front end on the BMS's SPI bus: 16 cells, current, temperatures.", "model"],
     micro: ["Inverter board", "Model of the inverter board (Micro 116 protocol): setpoint clamp, grid-connect delay, slew, losses.", "model"] },
@@ -1125,7 +1127,8 @@ function flags(list) { return `<div class="flags">${list.map(([n, on, bad]) => `
 function inspector() {
   if (!SN) { $("ibody").innerHTML = '<div class="empty">Start a device to inspect it.</div>'; return; }
   const dd = MODEL === "B2500" ? DESC : DESC_V;
-  const d = (TITLES[MODEL] || {})[sel] || dd[sel] || dd.mcu, kind = d[2], r = SN.mcu.regs || {};
+  const d = (sel === "mppt" && SN.mppt && SN.mppt.real ? MPPT_REAL : null) || (TITLES[MODEL] || {})[sel] || dd[sel] || dd.mcu,
+    kind = d[2], r = SN.mcu.regs || {};
   let h = `<div class="ititle"><div><h2>${d[0]}</h2><p>${d[1]}</p></div><span class="badge ${kind}">${kind === "real" ? "real firmware" : kind === "ext" ? "outside the box" : "model"}</span></div>`;
   if (MODEL !== "B2500") {
     h += inspectVenus();
@@ -1256,8 +1259,10 @@ function inspectVenus() {
   const inv = SN.inverter, bms = SN.bms;
   if (sel === "mppt" || sel.startsWith("string")) {
     const mp = SN.mppt;
-    return kv([["PV harvested", `${Math.round(sum(mp.pv))} W`], ...mp.pv.map((w, k) => [`String ${k + 1}`, `${Math.round(w)} of ${Math.round(mp.avail[k])} W`]),
-      ["PV limit from the control", `${mp.limit} W`], ["Into the pack", `${Math.round(mp.dc)} W`], ["Mode", mp.mode], ["Protocol", "v" + mp.version]]);
+    return kv([["PV harvested", `${Math.round(sum(mp.pv))} W`],
+      ...mp.pv.map((w, k) => [`String ${k + 1}`, `${Math.round(w)} of ${Math.round(mp.avail[k])} W` + (mp.v ? ` at ${num(mp.v[k], 1)} V` : "")]),
+      ["PV limit from the control", `${mp.limit} W`], ["Into the pack", `${Math.round(mp.dc)} W`], ["Mode", mp.mode],
+      [mp.real ? "Firmware version" : "Protocol", mp.version == null ? "not reported yet" : "v" + mp.version]]);
   }
   if (sel === "mcu") {
     return kv([["Image", esc(SN.image)], ["Profile", SN.profile], ["Firmware version", SN.version ? "V" + SN.version : "not reported yet"],
@@ -1790,7 +1795,8 @@ let images = [], chosen = null, canUpload = true;
 let bmsFor = null;   // the control image the BMS choice was made for
 function renderImages() {
   const box = $("imgs");
-  const devs = images.filter((i) => i.role !== "bms"), bmss = images.filter((i) => i.role === "bms");
+  const devs = images.filter((i) => i.role === "device"), bmss = images.filter((i) => i.role === "bms");
+  const mppts = images.filter((i) => i.role === "mppt");
   if (!devs.length) box.innerHTML = '<div class="empty">No firmware images in the firmware folder yet.</div>';
   else box.innerHTML = devs.map((im) => `<button class="img" data-img="${esc(im.name)}" aria-pressed="${im.name === chosen}" ${im.supported ? "" : "disabled"}>
       <small class="${im.supported ? "ok" : ""}">${esc(im.supported ? im.model : "not yet")}</small>
@@ -1819,6 +1825,13 @@ function renderImages() {
     $("bmsSel").innerHTML = '<option value="">none: the BMS model</option>' + bmss.map((b) => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join("");
     if (bmss.some((b) => b.name === cur)) $("bmsSel").value = cur;
   }
+  const optMppt = !!(ch && ch.mppt_optional && mppts.length);
+  $("mpptPick").hidden = !optMppt;
+  if (optMppt) {
+    const cur = $("mpptSel").value;
+    $("mpptSel").innerHTML = '<option value="">none: the MPPT model</option>' + mppts.map((b) => `<option value="${esc(b.name)}">${esc(b.name)}</option>`).join("");
+    if (mppts.some((b) => b.name === cur)) $("mpptSel").value = cur;
+  }
   const pvIn = !ch || ch.pv_inputs > 0, ct = !!(ch && ch.model === "CT002 / CT003");
   const pv4 = !!(ch && ch.pv_inputs >= 4);
   $("oPvA").parentElement.hidden = !pvIn; $("oPvB").parentElement.hidden = !pvIn;
@@ -1835,7 +1848,7 @@ async function upload(file) {
     const info = await post("api/firmware?name=" + encodeURIComponent(file.name), file, true);
     const st = await (await fetch("api/state")).json();
     images = st.images; chosen = info.supported ? info.name : chosen;
-    if (!info.supported && info.role !== "bms") $("startErr").textContent = `${info.name}: ${info.profile || "unknown image"} is not in the dashboard yet.`;
+    if (!info.supported && info.role === "device") $("startErr").textContent = `${info.name}: ${info.profile || "unknown image"} is not in the dashboard yet.`;
     renderImages();
   } catch (e) { $("startErr").textContent = e.message; }
 }
@@ -1851,6 +1864,7 @@ $("startBtn").addEventListener("click", async () => {
   try {
     const ch = images.find((i) => i.name === chosen);
     await post("api/start", { image: chosen, bms: ch && (ch.needs_bms || ch.bms_optional) ? $("bmsSel").value || undefined : undefined,
+      mppt: ch && ch.mppt_optional && !$("mpptPick").hidden ? $("mpptSel").value || undefined : undefined,
       pv: [+$("oPvA").value, +$("oPvB").value, ...(ch && ch.pv_inputs >= 4 ? [+$("oPvC").value, +$("oPvD").value] : [])], load: +$("oLoadS").value, soc: +$("oSoc").value,
       packs: ch && ch.packs ? +$("oPacks").value : undefined, batteries: ch && ch.model === "CT002 / CT003" ? +$("oBats2").value : undefined });
     // don't wait for the stream to tell: a proxy (Home Assistant's ingress, a phone that

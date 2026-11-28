@@ -126,6 +126,10 @@ def test_images_are_classified():
     assert hmi["supported"] and hmi["model"] == "HMI" and hmi["pv_inputs"] == 2 and not hmi["needs_bms"]
     assert hmi["device_type"] == "HMI-5"
     assert describe("115_bms.bin", 1, {"profile": "aux"})["role"] == "bms"
+    # the MPPT board's image goes with a Venus D or a Jupiter, as an option
+    mp = describe("104_mppt_VNSD-0.bin", 1, {"profile": "mppt", "device_types": ["VNSD"]})
+    assert mp["role"] == "mppt" and not mp["supported"]
+    assert d["mppt_optional"] and j["mppt_optional"] and not a["mppt_optional"] and not v["mppt_optional"]
 
 
 
