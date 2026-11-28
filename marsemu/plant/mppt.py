@@ -141,7 +141,10 @@ class MpptPlant:
         self._adc_cyc = -1 << 62
         self._refresh_cycles = max(1, int(REFRESH_S * self.clock.hz))
         self._rng = 4321
-        m.adc.source = self._adc
+        def source(ch: int) -> int:
+            return self._adc(ch)
+        source.batch = self._adc_batch      # all 16 at once (the native ADC samples a batch)
+        m.adc.source = source
         self.set_temp(temp_c)
 
     # -- inputs from the board
@@ -182,6 +185,13 @@ class MpptPlant:
             self._adc_cyc = cyc
             self._refresh_adc()
         return self._adc_vals[ch]
+
+    def _adc_batch(self, mask: int) -> List[int]:
+        cyc = self.clock.cycles
+        if not 0 <= cyc - self._adc_cyc < self._refresh_cycles:
+            self._adc_cyc = cyc
+            self._refresh_adc()
+        return self._adc_vals
 
     def _noise(self) -> int:
         self._rng = (self._rng * 1103515245 + 12345) & 0x7FFFFFFF

@@ -39,8 +39,8 @@ data from the running firmware:
 
 Every device marsemu models. Pick the image on the start screen; devices
 with a BMS image of their own take it too, and the Venus D and the Jupiter
-the MPPT board's image if it is in the folder (it runs at about a sixth of
-real time, and the device with it).
+the MPPT board's image if it is in the folder (the device then runs at
+about 0.8× real time instead of 1.5×).
 
 | Device | Images | What the view shows |
 |---|---|---|
@@ -51,7 +51,7 @@ real time, and the device with it).
 | **Venus E Mini** | control (`venus-mini`, VNSEMINI) | the control firmware with its battery management, the inverter and DC/DC models on UART4/UART5, two cells |
 | **Jupiter C/E, C Plus** | control (`jupiter`), BMS and MPPT optional | the inverter model; the C Plus's real BMS and MPPT firmware with their images, else the BMS model (Pylontech-style frames) and the MPPT model |
 | **Venus C/E** | control (`venus`, HMG) + BMS | the control MCU runs the power stage itself: the LLC, the DC bus, the bridge and the grid relay it drives, the BMS firmware on CAN. It runs at about a sixth of real time |
-| **Saturn M (HMI)** | one (`hmi`) | the F28035 running the whole microinverter: the grid-connect state, both flybacks with their duty and the strings' voltage and current, the unfolder and the grid relay; PV sliders, a grid-loss scenario. It runs at about a fifth of real time |
+| **Saturn M (HMI)** | one (`hmi`) | the F28035 running the whole microinverter: the grid-connect state, both flybacks with their duty and the strings' voltage and current, the unfolder and the grid relay; PV sliders, a grid-loss scenario. It runs at about two fifths of real time |
 | **CT002 / CT003** | one (`ct00x`) | the meter's firmware answering virtual batteries that poll it over UDP (how many, and what power they report, are controls). The grid it measures is the house load, spread over the three phases, minus what each battery delivers: on a CT002 through a model of its metering chip, on a CT003 (a P1 reader) as the utility meter's telegrams on its P1 port |
 
 On every CAN device the internal bus is decoded: setpoints and limits to

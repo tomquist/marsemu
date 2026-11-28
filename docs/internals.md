@@ -71,10 +71,30 @@ emulator of its own:
   loads at the boundaries the firmware selects), eCAP, SCI, LIN, I2C, eCAN
   (32 mailboxes, acceptance masks, overwrite protection, both byte orders,
   the mailbox interrupts; connected to the co-simulation's CAN bus like the
-  Cortex-M CAN controllers), the watchdog. The boot ROM's IQmath tables (`c28x/iqmath.py`) are computed from
-  their definitions: the IQmath code in the application divides and takes
-  square roots with seeds and limits from them. TI's OTP calibration routines
-  are stubs that return what the device would.
+  Cortex-M CAN controllers), the watchdog. The boot ROM's IQmath tables
+  (`c28x/iqmath.py`) are computed from their definitions: the IQmath code in
+  the application divides and takes square roots with seeds and limits from
+  them. TI's OTP calibration routines are stubs that return what the device
+  would.
+* **Native peripherals** (`c28x/_f2803x.h`, `f2803x_native.py`): the control
+  loops of the C2000 firmware run at 50–100 kHz, and every period an ePWM
+  starts the ADC, the end of conversion interrupts the CPU and starts a CLA
+  task, and both write the ePWM compare and trip-zone registers. With the
+  accelerator, the PIE, ePWM1–7, the ADC and the CLA's task dispatch run in
+  the core, a line-by-line port of the Python models; their timed events run
+  in the core's loop, and the Python objects become facades with the same
+  interface (`duty()`, `cmpa`, `adc.source`, `pie.counts`). The board models
+  hand over all analog inputs of a conversion batch at once
+  (`source.batch(mask)`). Registers a model declares `cacheable` (no side
+  effect, no dependence on time, e.g. the LIN status the firmware polls) are
+  read once until the core next calls into Python. Tests run the same
+  register scripts on both and compare, and the MPPT and HMI firmware
+  execute the same instructions either way. `MARSEMU_PY_PERIPHERALS=1` keeps
+  the Python models. The MPPT board runs about 5× faster this way, the HMI
+  about 2× (its board model is most of the rest).
+* **Event timing**: an event scheduled while the CPU runs a slice (an ADC
+  conversion a register write forces, a UART byte) ends the slice at its
+  time, so it is not taken late.
 
 `machine.py` runs it all on the same event clock as the Cortex-M machines;
 delay loops the firmware spins in (`RPT #n || NOP` with a counter) are slept

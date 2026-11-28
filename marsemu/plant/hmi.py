@@ -166,7 +166,10 @@ class HmiPlant:
         self._adc_vals[CH_PE] = 52
         self._adc_cyc = -1
         self._rng = 12345
-        m.adc.source = self._adc
+        def source(ch: int) -> int:
+            return self._adc(ch)
+        source.batch = self._adc_batch      # all 16 at once (the native ADC samples a batch)
+        m.adc.source = source
         m.adc.temp_raw = self._temp_raw(ambient_c)
         m.gpio.listeners.append(self._gpio)
         self._zc_ev = None
@@ -250,6 +253,13 @@ class HmiPlant:
             self._adc_cyc = cyc
             self._refresh_adc()
         return self._adc_vals[ch]
+
+    def _adc_batch(self, mask: int) -> List[int]:
+        cyc = self.clock.cycles
+        if cyc != self._adc_cyc:
+            self._adc_cyc = cyc
+            self._refresh_adc()
+        return self._adc_vals
 
     def _refresh_adc(self) -> None:
         self._advance()

@@ -274,20 +274,11 @@ static PyObject *cla_state(PyObject *self, PyObject *args) {
                          s->luf, s->lvf, s->rndf32, (unsigned long)s->mrpc);
 }
 
-/* cla_run(core, entry) -> (steps, unknown_pc or -1); the CLA registers live in the core */
-static PyObject *cla_run(PyObject *self, PyObject *args) {
-    PyObject *core;
-    unsigned long entry;
-    if (!PyArg_ParseTuple(args, "O!k", &CoreType, &core, &entry)) return NULL;
-    Core *c = (Core *)core;
+/* run a task from entry to MSTOP at the core's current time; 0, or -1 on an error */
+static int cla_exec(Core *c, uint32_t entry, long *steps_out, long *unknown_out) {
     Cla *sp = &c->cla;
 #define s (*sp)
-    c->err = 0;
-    PyObject *cv = PyObject_GetAttr(c->clock, s_cycles);
-    if (!cv) return NULL;
-    c->cycles = PyLong_AsLongLong(cv);
-    Py_DECREF(cv);
-    uint32_t pc = (uint32_t)entry;
+    uint32_t pc = entry;
     int hist[4][5];
     for (int i = 0; i < 4; i++) { hist[i][0] = s.nf; hist[i][1] = s.zf; hist[i][2] = s.tf; hist[i][3] = s.luf; hist[i][4] = s.lvf; }
     int hp = 0;
@@ -309,7 +300,7 @@ static PyObject *cla_run(PyObject *self, PyObject *args) {
         int old[5]; memcpy(old, hist[hp], sizeof old);
         int mreg; uint32_t mval;
         int r = cla_step(c, sp, pc, msw, lsw, &mreg, &mval);
-        if (c->err) return NULL;
+        if (c->err) return -1;
         if (r == -1) { unknown = (long)pc; break; }
         if (mreg >= 0 && npend < 2) { pend_r[npend] = mreg; pend_v[npend] = mval; pend_n[npend] = 3; npend++; }
         if (r == 1) {
@@ -334,5 +325,23 @@ static PyObject *cla_run(PyObject *self, PyObject *args) {
         pc += 2;
     }
 #undef s
+    *steps_out = steps;
+    *unknown_out = unknown;
+    return 0;
+}
+
+/* cla_run(core, entry) -> (steps, unknown_pc or -1); the CLA registers live in the core */
+static PyObject *cla_run(PyObject *self, PyObject *args) {
+    PyObject *core;
+    unsigned long entry;
+    if (!PyArg_ParseTuple(args, "O!k", &CoreType, &core, &entry)) return NULL;
+    Core *c = (Core *)core;
+    c->err = 0;
+    PyObject *cv = PyObject_GetAttr(c->clock, s_cycles);
+    if (!cv) return NULL;
+    c->cycles = PyLong_AsLongLong(cv);
+    Py_DECREF(cv);
+    long steps = 0, unknown = -1;
+    if (cla_exec(c, (uint32_t)entry, &steps, &unknown) < 0) return NULL;
     return Py_BuildValue("ll", steps, unknown);
 }

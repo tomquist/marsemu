@@ -131,7 +131,10 @@ def build(m: C28xMachine, models: Optional[Dict[str, type]] = None) -> None:
     m.cla = m.get("CLA1")
     cpu.iack_hook = m.cla.iack
     m.nvic = sysp.InterruptCounts(m)
-    m.adc.int_listeners.append(lambda n: m.cla.peripheral_irq("adc", n))
+    def cla_trigger(n):
+        m.cla.peripheral_irq("adc", n)
+    cla_trigger.cla_trigger = True     # the native peripherals do this themselves
+    m.adc.int_listeners.append(cla_trigger)
     m.get("ADCRESULT").adc = m.adc
     # ADCRESULT0-15 are read-only: served from the memory the ADC writes
     cpu.map(0x0B00, 0x0B40, RAM)

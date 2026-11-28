@@ -62,9 +62,19 @@ typedef struct {
     uint32_t mrpc;
 } Cla;
 
+typedef struct Fp Fp;
+
+/* IO registers whose value is model state only (no side effect, no time):
+   a read is served again until the core next calls into Python */
+typedef struct { uint32_t epoch; uint16_t val; uint8_t on, pad; } IoCache;
+#define IOC_SIZE 0x8000u
+
 typedef struct {
     PyObject_HEAD
     Cla cla;
+    Fp *fp;                /* native F2803x peripherals (_f2803x.h), or NULL */
+    IoCache *ioc;          /* or NULL */
+    uint32_t epoch;        /* bumped whenever Python may have changed a model */
     uint32_t acc, p, xt, xar[8], rpc, pc;
     uint32_t sp, dp;
     int sxm, ovm, tc, c, z, n, v, pm, ovc;
@@ -75,6 +85,7 @@ typedef struct {
     int64_t wait_pc, wait_left;
     int halted;
     int64_t cycles;
+    int64_t limit;         /* where the running slice ends (an event scheduled meanwhile can bring it in) */
     uint64_t insn_count;
     int err;
     /* memory */
@@ -103,6 +114,7 @@ static inline int32_t si16(uint32_t v) { return (int16_t)(uint16_t)v; }
 static inline int32_t si32(uint32_t v) { return (int32_t)v; }
 
 static void sync_clock(Core *c) {
+    c->epoch++;            /* Python runs next: cached IO reads are stale */
     PyObject *v = PyLong_FromLongLong(c->cycles);
     if (!v) { c->err = 1; return; }
     if (PyObject_SetAttr(c->clock, s_cycles, v) < 0) c->err = 1;
@@ -121,7 +133,15 @@ static void invalidate(Core *c, uint32_t a) {
     if (a) { e = entry_for(c, a - 1); if (e) e->key = -1; }
 }
 
+static int fp_io_read(Core *c, uint32_t a, uint32_t *out);
+static int fp_io_write(Core *c, uint32_t a, uint32_t v);
+
+static int fp_tracing(Core *c);
+
 static uint32_t io_read(Core *c, uint32_t a) {
+    if (c->fp) { uint32_t v; if (fp_io_read(c, a, &v)) return v & M16; }
+    IoCache *ce = (c->ioc && a < IOC_SIZE && c->ioc[a].on && !fp_tracing(c)) ? &c->ioc[a] : NULL;
+    if (ce && ce->epoch == c->epoch) return ce->val;
     sync_clock(c);
     PyObject *p = PyList_GET_ITEM(c->io, a >> 6);
     PyObject *pa = PyLong_FromUnsignedLong(a);
@@ -130,10 +150,12 @@ static uint32_t io_read(Core *c, uint32_t a) {
     if (!r) { c->err = 1; return 0; }
     uint32_t v = (uint32_t)PyLong_AsUnsignedLongMask(r) & M16;
     Py_DECREF(r);
+    if (ce) { ce->epoch = c->epoch; ce->val = (uint16_t)v; }
     return v;
 }
 
 static void io_write(Core *c, uint32_t a, uint32_t v) {
+    if (c->fp && fp_io_write(c, a, v & M16)) return;
     sync_clock(c);
     PyObject *p = PyList_GET_ITEM(c->io, a >> 6);
     PyObject *pa = PyLong_FromUnsignedLong(a), *pv = PyLong_FromUnsignedLong(v & M16);
@@ -453,6 +475,7 @@ static int run_py(Core *c, uint32_t at) {
 /* execute one decoded instruction; returns 0, or -1 on a Python error */
 static int exec1(Core *c, Entry *e, uint32_t at);
 
+#include "_f2803x.h"
 #include "_c28x_exec.h"
 
 /* ------------------------------------------------------------- the loop */
@@ -463,21 +486,35 @@ static PyObject *Core_run(Core *c, PyObject *args) {
     if (!cv) return NULL;
     c->cycles = PyLong_AsLongLong(cv);
     Py_DECREF(cv);
-    int64_t start = c->cycles, end = start + budget;
+    int64_t start = c->cycles;
+    c->limit = start + budget;
+#define end (c->limit)
     uint64_t n = 0;
     c->err = 0;
+    c->epoch++;
     while (c->cycles < end) {
+        if (c->fp && c->cycles >= c->fp->next) {
+            if (fp_due(c) < 0 || c->err) goto fail;
+        }
         if (c->ifr && !c->intm) {
             uint32_t bits = c->ifr & c->ier;
             if (bits) {
                 int k = __builtin_ctz(bits) + 1;
-                sync_clock(c);
-                /* Python acknowledges (PIE) and returns the vector; the context save is here */
+                uint32_t vec;
                 c->ifr &= ~(1u << (k - 1));
-                PyObject *r = PyObject_CallFunction(c->cb_take, "i", k);
-                if (!r) goto fail;
-                uint32_t vec = (uint32_t)PyLong_AsUnsignedLongMask(r) & M22;
-                Py_DECREF(r);
+                if (c->fp) {
+                    /* the native PIE acknowledges and gives the vector (machine._on_ack, Pie.vector) */
+                    c->fp->exc_count++;
+                    c->fp->int_count[k]++;
+                    vec = pie_vector(c, k) & M22;
+                } else {
+                    sync_clock(c);
+                    /* Python acknowledges (PIE) and returns the vector; the context save is here */
+                    PyObject *r = PyObject_CallFunction(c->cb_take, "i", k);
+                    if (!r) goto fail;
+                    vec = (uint32_t)PyLong_AsUnsignedLongMask(r) & M22;
+                    Py_DECREF(r);
+                }
                 uint32_t ret = c->pc;
                 c->sp = (c->sp + 1) & M16;
                 push32(c, (c->xt & 0xFFFF0000u) | st0(c));
@@ -492,6 +529,11 @@ static PyObject *Core_run(Core *c, PyObject *args) {
                 c->pc = vec;
                 if (c->err) goto fail;
             }
+        }
+        if (c->idle_wait && c->fp && c->fp->next < end && !c->halted) {
+            /* asleep: on to the next native event (it may wake the CPU) */
+            if (c->fp->next > c->cycles) c->cycles = c->fp->next;
+            continue;
         }
         if (c->idle_wait || c->halted) break;
         uint32_t pc = c->pc;
@@ -546,6 +588,8 @@ fail:
     return NULL;
 }
 
+#undef end
+
 /* ------------------------------------------------------------- object */
 static int Core_init(Core *c, PyObject *args, PyObject *kw) {
     PyObject *mem, *pt, *keys;
@@ -581,6 +625,12 @@ static int Core_init(Core *c, PyObject *args, PyObject *kw) {
 }
 
 static void Core_dealloc(Core *c) {
+    PyMem_Free(c->ioc);
+    if (c->fp) {
+        Py_XDECREF(c->fp->adc.sample); Py_XDECREF(c->fp->adc.listeners);
+        Py_XDECREF(c->fp->boundary_cb); Py_XDECREF(c->fp->tz_cb);
+        PyMem_Free(c->fp);
+    }
     if (c->membuf.obj) PyBuffer_Release(&c->membuf);
     if (c->ptbuf.obj) PyBuffer_Release(&c->ptbuf);
     Py_XDECREF(c->io); Py_XDECREF(c->clock); Py_XDECREF(c->cb_decode); Py_XDECREF(c->cb_py);
@@ -653,7 +703,7 @@ U32(acc) U32(p) U32(xt) U32(rpc) U32(pc) U32(sp) U32(dp) U32(ier) U32(ifr) U32(d
 INT(sxm) INT(ovm) INT(tc) INT(c) INT(z) INT(n) INT(v) INT(pm) INT(ovc) INT(intm) INT(dbgm) INT(page0) INT(vmap)
 INT(spa) INT(loop) INT(eallow) INT(idlestat) INT(amode) INT(objmode) INT(m0m1map) INT(xf) INT(arp)
 INT(rpt_pending) INT(rpt_i) INT(rpt_last) INT(bio) INT(idle_wait) INT(halted)
-I64(wait_pc) I64(wait_left)
+I64(wait_pc) I64(wait_left) I64(limit)
 static PyObject *get_insn_count(Core *c, void *x) { return PyLong_FromUnsignedLongLong(c->insn_count); }
 static int set_insn_count(Core *c, PyObject *v, void *x) { c->insn_count = PyLong_AsUnsignedLongLong(v); return 0; }
 static PyObject *get_st0(Core *c, void *x) { return PyLong_FromUnsignedLong(st0(c)); }
@@ -666,7 +716,7 @@ static PyGetSetDef Core_getset[] = {
     GS(acc) GS(p) GS(xt) GS(rpc) GS(pc) GS(sp) GS(dp) GS(ier) GS(ifr) GS(dbgier) GS(dbgstat) GS(rptc)
     GS(sxm) GS(ovm) GS(tc) GS(c) GS(z) GS(n) GS(v) GS(pm) GS(ovc) GS(intm) GS(dbgm) GS(page0) GS(vmap)
     GS(spa) GS(loop) GS(eallow) GS(idlestat) GS(amode) GS(objmode) GS(m0m1map) GS(xf) GS(arp)
-    GS(rpt_pending) GS(rpt_i) GS(rpt_last) GS(bio) GS(idle_wait) GS(halted) GS(wait_pc) GS(wait_left)
+    GS(rpt_pending) GS(rpt_i) GS(rpt_last) GS(bio) GS(idle_wait) GS(halted) GS(wait_pc) GS(wait_left) GS(limit)
     GS(insn_count)
     {"st0", (getter)get_st0, (setter)set_st0_, NULL, NULL},
     {"st1", (getter)get_st1, (setter)set_st1_, NULL, NULL},
@@ -686,10 +736,16 @@ static PyTypeObject CoreType = {
 };
 
 #include "_cla.h"
+#include "_f2803x_api.h"
 
 static PyMethodDef module_methods[] = {
     {"cla_run", (PyCFunction)cla_run, METH_VARARGS, "run a CLA task natively"},
     {"cla_state", (PyCFunction)cla_state, METH_VARARGS, "get or set the CLA registers kept in the core"},
+    {"fp_enable", (PyCFunction)fp_enable, METH_VARARGS, "native F2803x peripherals on these IO pages"},
+    {"fp_callbacks", (PyCFunction)fp_callbacks, METH_VARARGS, "Python callbacks of the native peripherals"},
+    {"fp", (PyCFunction)fp_op, METH_VARARGS, "an operation on the native peripherals"},
+    {"fp_state", (PyCFunction)fp_state, METH_VARARGS, "state of a native peripheral"},
+    {"io_cacheable", (PyCFunction)io_cacheable, METH_VARARGS, "serve reads of an IO word from a cache"},
     {NULL}
 };
 

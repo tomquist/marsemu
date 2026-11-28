@@ -346,11 +346,11 @@ class C28x:
         or when :attr:`halted` is set."""
         clock = self.clock
         start = clock.cycles
-        end = start + cycles
+        self.limit = start + cycles
         cache = self.icache
         decode = self.decode
         n = 0
-        while clock.cycles < end:
+        while clock.cycles < self.limit:
             if self.ifr and not self.intm:
                 k = self.pending()
                 if k:
@@ -483,6 +483,14 @@ class AcceleratedC28x(C28x):
 
     def run(self, cycles: int) -> int:
         return self._core.run(cycles)
+
+    @property
+    def limit(self):
+        return self._core.limit
+
+    @limit.setter
+    def limit(self, v):
+        self._core.limit = v
 
     def _c_decode(self, pc: int):
         """What the core needs of the instruction at ``pc``: (key, size, L, A,

@@ -35,6 +35,11 @@ class Clock:
         self.cycles = 0
         self._q: list[Event] = []
         self._seq = itertools.count()
+        #: while a CPU runs a slice: where the slice ends, and what to call when
+        #: an event is scheduled before that (from inside the slice: a
+        #: peripheral access, an interrupt), so that the CPU stops there
+        self.horizon = 1 << 62
+        self.on_earlier: Optional[Callable[[int], None]] = None
 
     # -- conversions -----------------------------------------------------
     @property
@@ -55,6 +60,9 @@ class Clock:
     def at(self, when: int, fn: Callable[[], None], name: str = "") -> Event:
         ev = Event(max(when, self.cycles), next(self._seq), fn, name)
         heapq.heappush(self._q, ev)
+        if self.on_earlier is not None and ev.when < self.horizon:
+            self.horizon = ev.when
+            self.on_earlier(ev.when)
         return ev
 
     def after(self, cycles: int, fn: Callable[[], None], name: str = "") -> Event:
